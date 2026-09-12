@@ -21,13 +21,23 @@ Compensation methods
   fed by an ideal unity-gain buffer (VCVS) referenced to the row's own
   source node instead of through a passive R_row segment. This re-drives
   the row to the exact intended V_i at that point, resetting accumulated
-  IR-drop (a repeater, as in reference/microcap/base_r_line_10_WL_invertor.cir).
+  IR-drop periodically (a repeater, as in
+  reference/microcap/base_r_line_10_WL_invertor.cir). Kept for later study
+  of *partial* periodic buffering (interval > 1); see
+  examples/run_wl_buffer_interval_sweep.py. The *current* experiment uses
+  full buffering instead (see below).
+- source_buffer + buffer_interval=1: full per-cell WL compensation. A
+  buffer is placed right at the row's signal source (before the first
+  crosspoint) and another before every subsequent crosspoint
+  (buffer_interval=1 makes every row segment a buffer instead of a passive
+  R_row), so every crosspoint sees the row's intended V_i exactly and the
+  row's IR-drop is fully eliminated.
 - star_columns = True: each crosspoint gets its own dedicated wire straight
   to the column's virtual ground (length proportional to its distance from
   the bottom), instead of a shared chain of R_col segments. This removes
   cross-cell coupling through shared bit-line resistance.
 
-Both can be combined (buffer_interval > 0 and star_columns = True).
+Any of these can be combined with star_columns = True.
 """
 from __future__ import annotations
 
@@ -39,9 +49,10 @@ import numpy as np
 class CrossbarConfig:
     g: np.ndarray  # (n_rows, n_cols) conductances, Siemens
     v_in: np.ndarray  # (n_rows,) row drive voltages, Volts
-    r_row: float = 5.0  # ohms per row (word line) segment
-    r_col: float = 5.0  # ohms per column (bit line) segment
+    r_row: float = 10.0  # ohms per row (word line) segment
+    r_col: float = 10.0  # ohms per column (bit line) segment
     buffer_interval: int = 0  # 0 disables WL buffering; else insert every N-th crosspoint
+    source_buffer: bool = False  # True inserts an ideal buffer right at the row's signal source
     star_columns: bool = False  # True enables per-cell dedicated column wiring
     name: str = "crossbar"
 
@@ -66,12 +77,18 @@ class CrossbarConfig:
         return self.g.shape[1]
 
     def variant_label(self) -> str:
-        parts = ["baseline"]
+        wl = self.source_buffer and self.buffer_interval == 1
+        if wl and self.star_columns:
+            return "combined_full"
+        if wl:
+            return "wl_buffer_full"
+        if self.buffer_interval > 0 and self.star_columns:
+            return "combined_periodic"
         if self.buffer_interval > 0:
-            parts = ["wl_buffer"]
+            return "wl_buffer_periodic"
         if self.star_columns:
-            parts = ["bl_star"] if self.buffer_interval == 0 else ["combined"]
-        return parts[0]
+            return "bl_star"
+        return "baseline"
 
     def row_node(self, i: int, j: int) -> str:
         """SPICE node name for row i at crosspoint j (0-indexed)."""

@@ -40,36 +40,42 @@ def _errors(ideal: np.ndarray, measured: np.ndarray) -> tuple[float, float, floa
     return rmse, max_abs, max_rel
 
 
-def compare_all(
-    base_cfg: CrossbarConfig,
-    buffer_interval: int,
-) -> list[VariantResult]:
-    """Run baseline, WL-buffer, BL-star and combined variants of `base_cfg`
-    (base_cfg itself should have buffer_interval=0, star_columns=False) and
-    compare each against the ideal VMM result."""
+def evaluate_variant(label: str, cfg: CrossbarConfig, ideal: np.ndarray) -> VariantResult:
+    """Run `cfg` through ngspice and score it against a precomputed `ideal`
+    VMM result. Exposed separately from `compare_all` so other scripts (e.g.
+    examples/run_wl_buffer_interval_sweep.py) can build their own variant
+    sets without duplicating the ngspice-run + error-metric plumbing."""
+    currents = run_variant(cfg)
+    rmse, max_abs, max_rel = _errors(ideal, currents)
+    return VariantResult(
+        label=label, currents=currents, rmse=rmse, max_abs_error=max_abs, max_rel_error=max_rel
+    )
+
+
+def compare_all(base_cfg: CrossbarConfig) -> list[VariantResult]:
+    """Run baseline, full WL buffering, per-cell BL sensing, and both
+    combined, against `base_cfg` (itself should have buffer_interval=0,
+    source_buffer=False, star_columns=False) and compare each to the ideal
+    VMM result.
+
+    "Full WL buffering" means source_buffer=True and buffer_interval=1: a
+    buffer right at the row's source plus one before every crosspoint,
+    which fully cancels row IR-drop (see crossbar/topology.py). The
+    *partial/periodic* buffering variant (buffer_interval > 1, no source
+    buffer) is a separate, later research question — see
+    examples/run_wl_buffer_interval_sweep.py, which reuses `evaluate_variant`
+    directly instead of this function.
+    """
     ideal = ideal_vmm(base_cfg)
 
     variants = {
-        "baseline": replace(base_cfg, buffer_interval=0, star_columns=False),
-        "wl_buffer": replace(base_cfg, buffer_interval=buffer_interval, star_columns=False),
-        "bl_star": replace(base_cfg, buffer_interval=0, star_columns=True),
-        "combined": replace(base_cfg, buffer_interval=buffer_interval, star_columns=True),
+        "baseline": replace(base_cfg, buffer_interval=0, source_buffer=False, star_columns=False),
+        "wl_buffer_full": replace(base_cfg, buffer_interval=1, source_buffer=True, star_columns=False),
+        "bl_star": replace(base_cfg, buffer_interval=0, source_buffer=False, star_columns=True),
+        "combined_full": replace(base_cfg, buffer_interval=1, source_buffer=True, star_columns=True),
     }
 
-    results = []
-    for label, cfg in variants.items():
-        currents = run_variant(cfg)
-        rmse, max_abs, max_rel = _errors(ideal, currents)
-        results.append(
-            VariantResult(
-                label=label,
-                currents=currents,
-                rmse=rmse,
-                max_abs_error=max_abs,
-                max_rel_error=max_rel,
-            )
-        )
-    return results
+    return [evaluate_variant(label, cfg, ideal) for label, cfg in variants.items()]
 
 
 def print_report(ideal: np.ndarray, results: list[VariantResult]) -> None:

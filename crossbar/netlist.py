@@ -15,7 +15,17 @@ def generate_netlist(cfg: CrossbarConfig, title: str | None = None) -> str:
 
     # --- Row voltage sources ---
     for i in range(n):
-        lines.append(f"V{i} {cfg.row_node(i, 0)} 0 DC {_fmt(cfg.v_in[i])}")
+        if cfg.source_buffer:
+            # Ideal voltage source drives a raw source node, then an ideal
+            # unity-gain buffer re-drives crosspoint 0 from it. Explicit even
+            # though the source is already ideal, so the "buffer right at
+            # the source" stage shows up as its own element (matters once
+            # the source is made non-ideal later).
+            src_node = f"vsrc_{i}"
+            lines.append(f"V{i} {src_node} 0 DC {_fmt(cfg.v_in[i])}")
+            lines.append(f"Ebufsrc_{i} {cfg.row_node(i, 0)} 0 {src_node} 0 1")
+        else:
+            lines.append(f"V{i} {cfg.row_node(i, 0)} 0 DC {_fmt(cfg.v_in[i])}")
 
     # --- Row (word line) wiring ---
     for i in range(n):

@@ -35,17 +35,24 @@ the drawn figure never drift apart.
 
 ## Compensation methods implemented
 
-- **`wl_buffer`** — every `buffer_interval`-th crosspoint along a row is
-  fed by an ideal unity-gain buffer referenced to the row's own source
-  node, instead of through a passive `R_row` segment. This re-drives the
-  row to the exact intended `V_i`, resetting accumulated IR-drop
-  periodically (the repeater idea from `base_r_line_10_WL_invertor.cir`).
+- **`wl_buffer_full`** — full row (word-line) compensation: an ideal
+  unity-gain buffer sits right at the row's signal source
+  (`source_buffer=True`) and another before *every* crosspoint
+  (`buffer_interval=1`), instead of a passive `R_row` segment. Every
+  crosspoint then sees the row's intended `V_i` exactly, fully eliminating
+  row IR-drop. This is the current focus experiment.
 - **`bl_star`** — each crosspoint gets its own dedicated wire straight to
   the column's virtual ground (resistance proportional to its distance
   from the bottom), instead of a shared chain of `R_col` segments. This
   removes cross-cell coupling through shared bit-line resistance.
-- **`combined`** — both of the above together.
+- **`combined_full`** — both of the above together.
 - **`baseline`** — plain resistive crossbar, no compensation, for reference.
+
+*Partial/periodic* WL buffering (a repeater only every `buffer_interval`-th
+crosspoint, `source_buffer=False`, the original idea from
+`base_r_line_10_WL_invertor.cir`) is kept as a separate, later research
+question — see `examples/run_wl_buffer_interval_sweep.py` — and is not part
+of the four variants above.
 
 ## Requirements
 
@@ -57,11 +64,16 @@ pip install -r requirements.txt
 ## Usage
 
 ```
-python3 examples/run_demo.py --rows 8 --cols 8 --r-line 10 --buffer-interval 2
+python3 examples/run_demo.py --rows 8 --cols 8 --r-line 10 --r-cell 1000 --v-in 0.7
 ```
 
-This will:
-1. Build a random `rows x cols` conductance matrix and input vector.
+The default experiment uses uniform inputs and cell values (`V_in=0.7V`,
+`R_cell=1kΩ`, `R_line=10Ω` per WL/BL wire segment) so any variation across
+rows/columns comes purely from wire position, not from data randomness —
+this isolates the IR-drop effect the compensation methods are meant to fix.
+It will:
+1. Build the `rows x cols` array (uniform `G`/`V_in`, or pass your own via
+   the library API below).
 2. Run all four variants through ngspice and compare each against the
    ideal (zero-resistance) VMM result — RMSE, max absolute and max
    relative column error (`out/vmm_comparison.csv`, printed to stdout).
@@ -69,7 +81,15 @@ This will:
 4. Render illustrative schematics of a small `NxN` subset for all four
    variants (`out/schematics/*.svg` and `.png`) — vector figures suitable
    for a paper or patent, drawn directly from the array topology rather
-   than auto-laid-out from the netlist.
+   than auto-laid-out from the netlist. Wire resistance (`R_row`/`R_col`)
+   is drawn as an explicit zigzag on every segment, distinct from the
+   crosspoint cell resistors, so it's visible that it's actually modelled.
+
+For the periodic-buffering sweep (kept separate, see above):
+
+```
+python3 examples/run_wl_buffer_interval_sweep.py --rows 8 --cols 8 --r-line 10 --r-cell 1000 --v-in 0.7 --intervals 1 2 3 4 8
+```
 
 ## Library usage
 
@@ -79,9 +99,9 @@ from crossbar.compare import ideal_vmm, run_variant, compare_all
 
 cfg = CrossbarConfig(g=my_conductance_matrix, v_in=my_input_vector,
                       r_row=10.0, r_col=10.0)
-ideal = ideal_vmm(cfg)                       # numpy, no simulator needed
-measured = run_variant(cfg)                  # runs ngspice, returns column currents
-results = compare_all(cfg, buffer_interval=2)  # baseline/wl_buffer/bl_star/combined
+ideal = ideal_vmm(cfg)          # numpy, no simulator needed
+measured = run_variant(cfg)     # runs ngspice, returns column currents
+results = compare_all(cfg)      # baseline / wl_buffer_full / bl_star / combined_full
 ```
 
 ## Notes for extending this

@@ -23,7 +23,8 @@ instead of Micro-Cap.
 sudo apt-get install ngspice        # required system dependency, not pip-installable
 pip install -r requirements.txt     # numpy, matplotlib
 
-python3 examples/run_demo.py --rows 8 --cols 8 --r-line 10 --buffer-interval 2
+python3 examples/run_demo.py --rows 8 --cols 8 --r-line 10 --r-cell 1000 --v-in 0.7
+python3 examples/run_wl_buffer_interval_sweep.py --rows 8 --cols 8 --r-line 10 --r-cell 1000 --v-in 0.7
 ```
 
 There is no test suite, linter, or build step configured. There is no
@@ -48,13 +49,13 @@ print(ideal_vmm(cfg), run_variant(cfg))
 `crossbar/topology.py` (`CrossbarConfig`) is the single source of truth for
 a crossbar's electrical structure — array size, conductance matrix `g`,
 row input voltages `v_in`, per-segment wire resistance `r_row`/`r_col`,
-and the two compensation flags (`buffer_interval`, `star_columns`). Both
-the SPICE netlist generator and the schematic generator consume this same
-object, specifically so the simulated circuit and the drawn figure can
-never drift apart — when changing the electrical model, `topology.py` is
-the only place node naming/positions are decided; `netlist.py` and
-`schematic.py` must stay in sync with it rather than each inventing their
-own layout.
+and the compensation flags (`buffer_interval`, `source_buffer`,
+`star_columns`). Both the SPICE netlist generator and the schematic
+generator consume this same object, specifically so the simulated circuit
+and the drawn figure can never drift apart — when changing the electrical
+model, `topology.py` is the only place node naming/positions are decided;
+`netlist.py` and `schematic.py` must stay in sync with it rather than each
+inventing their own layout.
 
 Data flow: `CrossbarConfig` → `netlist.generate_netlist()` (SPICE text) →
 `simulate.run_ngspice()` (subprocess, batch mode `-b`) →
@@ -74,13 +75,26 @@ Compensation methods are not separate code paths but flags on the same
 - `buffer_interval > 0` replaces a passive `Rrow` segment with an ideal
   unity-gain VCVS (`Ebuf_*`) at every Nth crosspoint, referenced back to
   the row's own source node (`rn_i_0`) — a repeater that re-drives the
-  exact intended `V_i` regardless of downstream current.
+  exact intended `V_i` regardless of downstream current. Kept general for
+  a *periodic/partial* buffering study (interval > 1) — see
+  `examples/run_wl_buffer_interval_sweep.py` — not part of the main
+  `compare_all` variant set.
+- `source_buffer = True` puts an ideal buffer between the row's raw
+  voltage source and crosspoint 0 (a `vsrc_i` node plus `Ebufsrc_i`),
+  explicit even though the source is already ideal (so it stays meaningful
+  once a non-ideal source is modelled later). Combined with
+  `buffer_interval = 1` (a buffer before every crosspoint) this is *full*
+  WL compensation (`variant_label()` reports it as `wl_buffer_full`) — the
+  current experiment's row-side method, electrically zeroing row IR-drop.
 - `star_columns = True` replaces the shared chain of `Rcol` segments with
   a dedicated resistor from each crosspoint straight to the column's
   virtual ground (length/resistance scales with distance from the
   bottom), removing shared-wire coupling between cells in a column.
-- Both flags combine independently (`compare.compare_all` runs all four
-  combinations: baseline / wl_buffer / bl_star / combined).
+- `compare.compare_all` runs four combinations of the *full* WL method with
+  `star_columns`: baseline / wl_buffer_full / bl_star / combined_full.
+  `compare.evaluate_variant` is the reusable single-variant runner (ngspice
+  run + error metrics) both `compare_all` and the interval-sweep script
+  build on, so a new variant set doesn't need to duplicate that plumbing.
 
 `crossbar/schematic.py` draws the regular grid structure directly from
 `CrossbarConfig` (matplotlib, saved as SVG+PNG) rather than laying out the
@@ -88,13 +102,27 @@ generated netlist — general netlist-to-schematic auto-layout produces
 unreadable results for anything but the most regular circuits, so schematic
 generation deliberately mirrors the topology model's node placement instead.
 It is meant for illustrative small subsets (e.g. 4x4); full-size arrays are
-simulated but not schematically rendered in full.
+simulated but not schematically rendered in full. Every wire segment that
+carries `R_row`/`R_col` is drawn as an explicit resistor zigzag (distinct,
+smaller-amplitude style from the crosspoint cell resistors) — a buffered
+row segment draws the buffer symbol instead of a zigzag, since it has zero
+effective resistance. Don't let this drift back to plain lines for
+interconnect — that previously made it look like wire resistance wasn't
+modelled at all, which it always was (in the netlist) even when the
+picture didn't show it.
 
 `examples/run_demo.py` is the orchestration script (CLI flags for array
-size, line resistance, buffer interval, seed) and the reference for how the
-pieces above compose end-to-end, including writing `out/vmm_comparison.csv`
-and `out/error_comparison.png`. `out/` is gitignored — it is regenerated
-output, not checked-in state.
+size, line/cell resistance, input voltage) and the reference for how the
+pieces above compose end-to-end for the *full*-compensation experiment,
+including writing `out/vmm_comparison.csv` and `out/error_comparison.png`.
+Its default array is uniform (`g` and `v_in` constant), not random —
+deliberately, so any asymmetry across rows/columns in the results comes
+only from wire position, isolating the IR-drop effect being studied.
+`examples/run_wl_buffer_interval_sweep.py` is the separate script for the
+periodic-buffering research question (`buffer_interval` swept,
+`source_buffer=False`); it's independent of `compare_all` on purpose so
+that experiment doesn't get entangled with the main one. `out/` is
+gitignored — it is regenerated output, not checked-in state.
 
 ## Extending the cell model
 

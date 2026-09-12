@@ -18,12 +18,12 @@ from .topology import CrossbarConfig
 
 _COL_PITCH = 1.6
 _ROW_PITCH = 1.2
-_LEFT_MARGIN = 1.4
+_LEFT_MARGIN = 2.0
 _BOTTOM_MARGIN = 1.6
 _TOP_MARGIN = 0.6
 
 
-def _zigzag(ax, x0, y0, x1, y1, n=6, amp=0.09, **kw):
+def _zigzag(ax, x0, y0, x1, y1, n=6, amp=0.09, lw=1.1, **kw):
     """Resistor zigzag symbol between two points."""
     length = np.hypot(x1 - x0, y1 - y0)
     if length < 1e-9:
@@ -36,16 +36,27 @@ def _zigzag(ax, x0, y0, x1, y1, n=6, amp=0.09, **kw):
     offsets[1:-1] = [amp if k % 2 else -amp for k in range(1, 2 * n)]
     xs = xs + offsets * nx
     ys = ys + offsets * ny
-    ax.plot(xs, ys, color="black", lw=1.1, solid_capstyle="round", **kw)
+    ax.plot(xs, ys, color="black", lw=lw, solid_capstyle="round", **kw)
 
 
-def _vsource(ax, x, y, label):
-    """Circle voltage source, drawn to the left feeding into (x, y)."""
-    cx = x - 0.55
+def _vsource(ax, x, y, label, source_buffer=False):
+    """Circle voltage source, drawn to the left feeding into (x, y).
+
+    If `source_buffer`, an ideal unity-gain buffer is inserted on the wire
+    between the source and (x, y) — the explicit "buffer right at the
+    source" stage (see CrossbarConfig.source_buffer).
+    """
+    cx = x - 0.85 if source_buffer else x - 0.55
     ax.add_patch(Circle((cx, y), 0.22, fill=False, lw=1.2, color="black"))
     ax.text(cx, y + 0.02, "+", ha="center", va="center", fontsize=7)
-    ax.plot([cx - 0.22, x], [y, y], color="black", lw=1.0)
-    ax.text(cx - 0.55, y, label, ha="right", va="center", fontsize=8)
+    if source_buffer:
+        bx = (cx + x) / 2 + 0.1
+        ax.plot([cx + 0.22, bx - 0.32], [y, y], color="black", lw=1.0)
+        ax.plot([bx + 0.32, x], [y, y], color="black", lw=1.0)
+        _buffer(ax, bx, y)
+    else:
+        ax.plot([cx + 0.22, x], [y, y], color="black", lw=1.0)
+    ax.text(cx - 0.3, y, label, ha="right", va="center", fontsize=8)
 
 
 def _buffer(ax, x, y):
@@ -103,7 +114,7 @@ def draw_crossbar(cfg: CrossbarConfig, ax=None, title: str | None = None):
     # --- rows (word lines) ---
     for i in range(n):
         y = row_y[i]
-        _vsource(ax, col_x[0], y, f"V{i}={cfg.v_in[i]:g}V")
+        _vsource(ax, col_x[0], y, f"V{i}={cfg.v_in[i]:g}V", source_buffer=cfg.source_buffer)
         for j in range(1, m):
             x0, x1 = col_x[j - 1], col_x[j]
             if cfg.is_buffered_step(j):
@@ -112,7 +123,8 @@ def draw_crossbar(cfg: CrossbarConfig, ax=None, title: str | None = None):
                 ax.plot([bx + 0.32, x1], [y, y], color="black", lw=1.0)
                 _buffer(ax, bx, y)
             else:
-                ax.plot([x0, x1], [y, y], color="black", lw=1.0)
+                # Interconnect (word-line) wire resistance R_row.
+                _zigzag(ax, x0, y, x1, y, n=4, amp=0.06, lw=0.9)
         ax.plot([col_x[-1], col_x[-1] + 0.35], [y, y], color="black", lw=1.0)
 
     # --- crosspoint cell resistors ---
@@ -133,13 +145,15 @@ def draw_crossbar(cfg: CrossbarConfig, ax=None, title: str | None = None):
             for i in range(n):
                 fan_x = x + 0.16 + 0.11 * i
                 ax.plot([x, fan_x], [cell_bottom_y[i], cell_bottom_y[i]], color="black", lw=0.9)
-                ax.plot([fan_x, fan_x], [cell_bottom_y[i], merge_y], color="black", lw=0.9)
+                # Dedicated per-cell wire resistance R_col * distance-to-bottom.
+                _zigzag(ax, fan_x, cell_bottom_y[i], fan_x, merge_y, n=3, amp=0.05, lw=0.8)
                 ax.plot([fan_x, x], [merge_y, merge_y], color="black", lw=0.9)
             top_for_tia = merge_y
         else:
             for i in range(n - 1):
-                ax.plot([x, x], [cell_bottom_y[i], row_y[i + 1]], color="black", lw=1.0)
-            ax.plot([x, x], [cell_bottom_y[-1], bottom_y], color="black", lw=1.0)
+                # Interconnect (bit-line) wire resistance R_col.
+                _zigzag(ax, x, cell_bottom_y[i], x, row_y[i + 1], n=4, amp=0.06, lw=0.9)
+            _zigzag(ax, x, cell_bottom_y[-1], x, bottom_y, n=4, amp=0.06, lw=0.9)
             top_for_tia = cell_bottom_y[-1]
         _tia(ax, x, top_for_tia, bottom_y, f"I{j}")
 
@@ -147,7 +161,10 @@ def draw_crossbar(cfg: CrossbarConfig, ax=None, title: str | None = None):
     ax.set_ylim(bottom_y + 0.9, -0.4)  # inverted: row 0 at top
     ax.set_aspect("equal")
     ax.axis("off")
-    ax.set_title(title or f"{cfg.variant_label()} ({n}x{m})", fontsize=10)
+    ax.set_title(
+        title or f"{cfg.variant_label()} ({n}x{m}), R_line={cfg.r_row:g}Ω",
+        fontsize=10,
+    )
     return ax
 
 

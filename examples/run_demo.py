@@ -1,15 +1,24 @@
 """End-to-end demo: build a resistive crossbar, compare IR-drop compensation
 methods for VMM accuracy in ngspice, and render schematics + a summary plot.
 
+Current experiment: uniform inputs and cell values (V_in=0.7V, R_cell=1kOhm)
+so any variation across rows/columns comes purely from wire position, not
+from data randomness — this isolates the IR-drop effect the compensation
+methods are meant to fix. Compares baseline vs full WL buffering
+(source_buffer + buffer_interval=1) vs per-cell BL sensing (star_columns)
+vs both combined. (Partial/periodic WL buffering is a separate, later
+question — see run_wl_buffer_interval_sweep.py.)
+
 Usage:
     python3 examples/run_demo.py [--rows N] [--cols M] [--r-line OHMS]
-                                  [--buffer-interval K] [--seed S] [--out DIR]
+                                  [--r-cell OHMS] [--v-in VOLTS] [--out DIR]
 """
 from __future__ import annotations
 
 import argparse
 import csv
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -23,32 +32,30 @@ import matplotlib.pyplot as plt
 from crossbar.topology import CrossbarConfig
 from crossbar.compare import ideal_vmm, compare_all, print_report
 from crossbar.schematic import save_schematic
-from dataclasses import replace
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description=__doc__)
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--rows", type=int, default=8)
     ap.add_argument("--cols", type=int, default=8)
-    ap.add_argument("--r-line", type=float, default=10.0, help="ohms per WL/BL segment")
-    ap.add_argument("--buffer-interval", type=int, default=2)
-    ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--r-line", type=float, default=10.0, help="ohms per WL/BL wire segment (interconnect)")
+    ap.add_argument("--r-cell", type=float, default=1000.0, help="ohms per crosspoint cell")
+    ap.add_argument("--v-in", type=float, default=0.7, help="volts on every row source")
     ap.add_argument("--out", type=Path, default=Path(__file__).resolve().parent.parent / "out")
     ap.add_argument("--schematic-size", type=int, default=4, help="NxN subset size used for illustration schematics")
     args = ap.parse_args()
 
     args.out.mkdir(parents=True, exist_ok=True)
 
-    rng = np.random.default_rng(args.seed)
-    g = rng.uniform(0.1e-3, 1e-3, size=(args.rows, args.cols))
-    v_in = rng.uniform(0.1, 1.0, size=args.rows)
+    g = np.full((args.rows, args.cols), 1.0 / args.r_cell)
+    v_in = np.full(args.rows, args.v_in)
     base_cfg = CrossbarConfig(g=g, v_in=v_in, r_row=args.r_line, r_col=args.r_line)
 
     print(f"Crossbar: {args.rows}x{args.cols}, R_line={args.r_line} ohm/segment, "
-          f"buffer_interval={args.buffer_interval}\n")
+          f"R_cell={args.r_cell} ohm, V_in={args.v_in} V\n")
 
     ideal = ideal_vmm(base_cfg)
-    results = compare_all(base_cfg, buffer_interval=args.buffer_interval)
+    results = compare_all(base_cfg)
     print_report(ideal, results)
 
     # --- CSV of results ---
@@ -88,10 +95,10 @@ def main() -> None:
         g=g[:k, :k], v_in=v_in[:k], r_row=args.r_line, r_col=args.r_line
     )
     variants = {
-        "baseline": replace(illus_cfg, buffer_interval=0, star_columns=False),
-        "wl_buffer": replace(illus_cfg, buffer_interval=args.buffer_interval, star_columns=False),
-        "bl_star": replace(illus_cfg, buffer_interval=0, star_columns=True),
-        "combined": replace(illus_cfg, buffer_interval=args.buffer_interval, star_columns=True),
+        "baseline": replace(illus_cfg, buffer_interval=0, source_buffer=False, star_columns=False),
+        "wl_buffer_full": replace(illus_cfg, buffer_interval=1, source_buffer=True, star_columns=False),
+        "bl_star": replace(illus_cfg, buffer_interval=0, source_buffer=False, star_columns=True),
+        "combined_full": replace(illus_cfg, buffer_interval=1, source_buffer=True, star_columns=True),
     }
     sch_dir = args.out / "schematics"
     sch_dir.mkdir(exist_ok=True)
