@@ -12,12 +12,13 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.patches import Circle, FancyArrow, Polygon
+from matplotlib.patches import Circle, FancyArrow, Polygon, Rectangle
 
 from .topology import CrossbarConfig
 
 _COL_PITCH = 1.6
-_ROW_PITCH = 1.2
+_ROW_PITCH = 1.55
+_CELL_DROP = 0.6  # fraction of _ROW_PITCH from the row wire down to the column continuation
 _LEFT_MARGIN = 2.0
 _BOTTOM_MARGIN = 1.6
 _TOP_MARGIN = 0.6
@@ -74,6 +75,33 @@ def _buffer(ax, x, y):
     ax.text(x, y, "1x", ha="center", va="center", fontsize=6)
 
 
+def _memristor_box(ax, x, y0, y1, label):
+    """Memristor cell symbol: a labelled box with a small pulse-waveform
+    icon, matching the crossbar-array figures common in the ReRAM/memristor
+    literature (a box on the crosspoint rather than a plain resistor
+    zigzag) instead of a generic resistor symbol.
+
+    The top lead is deliberately long enough to clear the word-line
+    resistor zigzag at y0 before the label starts, so the label never
+    overlaps it.
+    """
+    h, w = 0.3, 0.5
+    top_stub = 0.42
+    box_top = y0 + top_stub
+    box_bottom = box_top + h
+    ymid = box_top + h / 2
+    ax.plot([x, x], [y0, box_top], color="black", lw=1.0)
+    ax.plot([x, x], [box_bottom, y1], color="black", lw=1.0)
+    ax.add_patch(
+        Rectangle((x - w / 2, box_top), w, h, fill=True, facecolor="white", edgecolor="black", lw=1.1)
+    )
+    # tiny rectangular-pulse icon inside the box
+    px = np.array([-0.16, -0.16, -0.03, -0.03, 0.09, 0.09, 0.16])
+    py = np.array([0.0, 0.07, 0.07, -0.07, -0.07, 0.0, 0.0])
+    ax.plot(x + px, ymid + py, color="black", lw=0.8)
+    ax.text(x, box_top - 0.06, label, ha="center", va="bottom", fontsize=6.5)
+
+
 def _tia(ax, x, y_top, y_bottom, label):
     """Virtual-ground / transimpedance-amplifier symbol at the column bottom."""
     ax.plot([x, x], [y_top, y_bottom + 0.15], color="black", lw=1.0)
@@ -127,16 +155,16 @@ def draw_crossbar(cfg: CrossbarConfig, ax=None, title: str | None = None):
                 _zigzag(ax, x0, y, x1, y, n=4, amp=0.06, lw=0.9)
         ax.plot([col_x[-1], col_x[-1] + 0.35], [y, y], color="black", lw=1.0)
 
-    # --- crosspoint cell resistors ---
+    # --- crosspoint memristor cells ---
     for i in range(n):
         for j in range(m):
             x, y = col_x[j], row_y[i]
-            _zigzag(ax, x, y, x, y + _ROW_PITCH * 0.55)
+            _memristor_box(ax, x, y, y + _ROW_PITCH * _CELL_DROP, f"G{i + 1},{j + 1}")
 
     # --- columns (bit lines) ---
     for j in range(m):
         x = col_x[j]
-        cell_bottom_y = [row_y[i] + _ROW_PITCH * 0.55 for i in range(n)]
+        cell_bottom_y = [row_y[i] + _ROW_PITCH * _CELL_DROP for i in range(n)]
         if cfg.star_columns:
             # Individual dedicated wire per cell: jog right into its own lane,
             # run down, then jog back to a common bus just above the TIA so
