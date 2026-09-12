@@ -41,6 +41,8 @@ def main() -> None:
     ap.add_argument("--r-line", type=float, default=10.0, help="ohms per WL/BL wire segment (interconnect)")
     ap.add_argument("--r-cell", type=float, default=1000.0, help="ohms per crosspoint cell")
     ap.add_argument("--v-in", type=float, default=0.7, help="volts on every row source")
+    ap.add_argument("--buffer-r-out", type=float, default=0.0,
+                     help="ohms of output resistance for every WL buffer (0 = ideal buffer)")
     ap.add_argument("--out", type=Path, default=Path(__file__).resolve().parent.parent / "out")
     ap.add_argument("--schematic-size", type=int, default=4, help="NxN subset size used for illustration schematics")
     args = ap.parse_args()
@@ -49,10 +51,12 @@ def main() -> None:
 
     g = np.full((args.rows, args.cols), 1.0 / args.r_cell)
     v_in = np.full(args.rows, args.v_in)
-    base_cfg = CrossbarConfig(g=g, v_in=v_in, r_row=args.r_line, r_col=args.r_line)
+    base_cfg = CrossbarConfig(
+        g=g, v_in=v_in, r_row=args.r_line, r_col=args.r_line, buffer_r_out=args.buffer_r_out
+    )
 
     print(f"Crossbar: {args.rows}x{args.cols}, R_line={args.r_line} ohm/segment, "
-          f"R_cell={args.r_cell} ohm, V_in={args.v_in} V\n")
+          f"R_cell={args.r_cell} ohm, V_in={args.v_in} V, buffer_r_out={args.buffer_r_out} ohm\n")
 
     ideal = ideal_vmm(base_cfg)
     results = compare_all(base_cfg)
@@ -92,7 +96,7 @@ def main() -> None:
     # --- illustrative schematics (small NxN subset, full array is too dense to draw) ---
     k = min(args.schematic_size, args.rows, args.cols)
     illus_cfg = CrossbarConfig(
-        g=g[:k, :k], v_in=v_in[:k], r_row=args.r_line, r_col=args.r_line
+        g=g[:k, :k], v_in=v_in[:k], r_row=args.r_line, r_col=args.r_line, buffer_r_out=args.buffer_r_out
     )
     variants = {
         "baseline": replace(illus_cfg, buffer_interval=0, source_buffer=False, star_columns=False),

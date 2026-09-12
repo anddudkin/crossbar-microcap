@@ -79,13 +79,22 @@ Compensation methods are not separate code paths but flags on the same
   a *periodic/partial* buffering study (interval > 1) — see
   `examples/run_wl_buffer_interval_sweep.py` — not part of the main
   `compare_all` variant set.
-- `source_buffer = True` puts an ideal buffer between the row's raw
-  voltage source and crosspoint 0 (a `vsrc_i` node plus `Ebufsrc_i`),
-  explicit even though the source is already ideal (so it stays meaningful
-  once a non-ideal source is modelled later). Combined with
-  `buffer_interval = 1` (a buffer before every crosspoint) this is *full*
-  WL compensation (`variant_label()` reports it as `wl_buffer_full`) — the
-  current experiment's row-side method, electrically zeroing row IR-drop.
+- `source_buffer = True` puts a buffer between the row's raw voltage
+  source and crosspoint 0 (a `vsrc_i` node plus `Ebufsrc_i`), explicit even
+  though the source is already ideal (so it stays meaningful once a
+  non-ideal source is modelled later). Combined with `buffer_interval = 1`
+  (a buffer before every crosspoint) this is *full* WL compensation
+  (`variant_label()` reports it as `wl_buffer_full`) — the current
+  experiment's row-side method, electrically zeroing row IR-drop *when the
+  buffer itself is ideal*.
+- `buffer_r_out` (default 0, ideal) gives every buffer — both
+  `Ebufsrc_*` and `Ebuf_*` — a series output resistance instead of driving
+  its node directly (see `netlist._buffer_lines`, which inserts an
+  intermediate node + `R*_rout` only when `buffer_r_out > 0`, so the ideal
+  case emits exactly the old single-VCVS line). This is what makes a real
+  op-amp/inverter's finite drive strength representable instead of an
+  idealized zero-impedance driver — full WL compensation degrades smoothly
+  as `buffer_r_out` grows relative to `r_row`.
 - `star_columns = True` replaces the shared chain of `Rcol` segments with
   a dedicated resistor from each crosspoint straight to the column's
   virtual ground (length/resistance scales with distance from the
@@ -105,11 +114,15 @@ It is meant for illustrative small subsets (e.g. 4x4); full-size arrays are
 simulated but not schematically rendered in full. Every wire segment that
 carries `R_row`/`R_col` is drawn as an explicit resistor zigzag (distinct,
 smaller-amplitude style from the crosspoint cell resistors) — a buffered
-row segment draws the buffer symbol instead of a zigzag, since it has zero
-effective resistance. Don't let this drift back to plain lines for
-interconnect — that previously made it look like wire resistance wasn't
-modelled at all, which it always was (in the netlist) even when the
-picture didn't show it.
+row segment draws the buffer symbol instead of a zigzag when
+`buffer_r_out == 0` (zero effective resistance), or the buffer symbol
+followed by a small zigzag when `buffer_r_out > 0`. Don't let this drift
+back to plain lines for interconnect — that previously made it look like
+wire resistance wasn't modelled at all, which it always was (in the
+netlist) even when the picture didn't show it. Crosspoint cells are drawn
+as a labelled box (`G_i,j` + a small pulse-waveform icon) rather than a
+resistor zigzag, matching the crossbar figures common in ReRAM/memristor
+papers.
 
 `examples/run_demo.py` is the orchestration script (CLI flags for array
 size, line/cell resistance, input voltage) and the reference for how the

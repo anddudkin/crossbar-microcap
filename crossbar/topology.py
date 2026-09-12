@@ -31,7 +31,11 @@ Compensation methods
   crosspoint) and another before every subsequent crosspoint
   (buffer_interval=1 makes every row segment a buffer instead of a passive
   R_row), so every crosspoint sees the row's intended V_i exactly and the
-  row's IR-drop is fully eliminated.
+  row's IR-drop is fully eliminated — assuming an ideal (zero output
+  impedance) buffer. `buffer_r_out` makes this non-ideal: every buffer
+  (source and per-crosspoint) gets that series output resistance instead
+  of driving its node directly, so a real op-amp/inverter's finite drive
+  strength can be modelled instead of an idealized one.
 - star_columns = True: each crosspoint gets its own dedicated wire straight
   to the column's virtual ground (length proportional to its distance from
   the bottom), instead of a shared chain of R_col segments. This removes
@@ -53,6 +57,7 @@ class CrossbarConfig:
     r_col: float = 10.0  # ohms per column (bit line) segment
     buffer_interval: int = 0  # 0 disables WL buffering; else insert every N-th crosspoint
     source_buffer: bool = False  # True inserts an ideal buffer right at the row's signal source
+    buffer_r_out: float = 0.0  # ohms of output (series) resistance for every buffer; 0 = ideal
     star_columns: bool = False  # True enables per-cell dedicated column wiring
     name: str = "crossbar"
 
@@ -67,6 +72,8 @@ class CrossbarConfig:
             raise ValueError("all conductances must be strictly positive")
         if self.buffer_interval < 0:
             raise ValueError("buffer_interval must be >= 0")
+        if self.buffer_r_out < 0:
+            raise ValueError("buffer_r_out must be >= 0")
 
     @property
     def n_rows(self) -> int:

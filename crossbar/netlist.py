@@ -9,6 +9,21 @@ def _fmt(x: float) -> str:
     return repr(float(x))
 
 
+def _buffer_lines(name: str, dst: str, src: str, r_out: float) -> list[str]:
+    """Netlist lines for one ideal unity-gain buffer (`name` is its element
+    name prefix), from `src` node to `dst` node. If `r_out` > 0, the VCVS
+    drives an internal node through an explicit series output resistor
+    instead of `dst` directly, modelling a non-ideal (finite drive
+    strength) buffer instead of an idealized zero-impedance one."""
+    if r_out > 0:
+        inode = f"{name}_out"
+        return [
+            f"{name} {inode} 0 {src} 0 1",
+            f"R{name}_rout {inode} {dst} {_fmt(r_out)}",
+        ]
+    return [f"{name} {dst} 0 {src} 0 1"]
+
+
 def generate_netlist(cfg: CrossbarConfig, title: str | None = None) -> str:
     n, m = cfg.n_rows, cfg.n_cols
     lines: list[str] = [title or f"Crossbar VMM ({cfg.variant_label()}, {n}x{m})"]
@@ -16,14 +31,14 @@ def generate_netlist(cfg: CrossbarConfig, title: str | None = None) -> str:
     # --- Row voltage sources ---
     for i in range(n):
         if cfg.source_buffer:
-            # Ideal voltage source drives a raw source node, then an ideal
+            # Ideal voltage source drives a raw source node, then a
             # unity-gain buffer re-drives crosspoint 0 from it. Explicit even
             # though the source is already ideal, so the "buffer right at
             # the source" stage shows up as its own element (matters once
             # the source is made non-ideal later).
             src_node = f"vsrc_{i}"
             lines.append(f"V{i} {src_node} 0 DC {_fmt(cfg.v_in[i])}")
-            lines.append(f"Ebufsrc_{i} {cfg.row_node(i, 0)} 0 {src_node} 0 1")
+            lines.extend(_buffer_lines(f"Ebufsrc_{i}", cfg.row_node(i, 0), src_node, cfg.buffer_r_out))
         else:
             lines.append(f"V{i} {cfg.row_node(i, 0)} 0 DC {_fmt(cfg.v_in[i])}")
 
@@ -33,10 +48,11 @@ def generate_netlist(cfg: CrossbarConfig, title: str | None = None) -> str:
             dst = cfg.row_node(i, j)
             src = cfg.row_node(i, j - 1)
             if cfg.is_buffered_step(j):
-                # Ideal unity-gain buffer: re-drives the row to the source's
-                # own node voltage (exact V_i, since the source is ideal),
-                # regardless of the current drawn downstream.
-                lines.append(f"Ebuf_{i}_{j} {dst} 0 {cfg.row_node(i, 0)} 0 1")
+                # Unity-gain buffer: re-drives the row to the source's own
+                # node voltage (exact V_i, since the source is ideal),
+                # through buffer_r_out ohms of output resistance (0 = ideal,
+                # regardless of the current drawn downstream).
+                lines.extend(_buffer_lines(f"Ebuf_{i}_{j}", dst, cfg.row_node(i, 0), cfg.buffer_r_out))
             else:
                 lines.append(f"Rrow_{i}_{j} {src} {dst} {_fmt(cfg.r_row)}")
 

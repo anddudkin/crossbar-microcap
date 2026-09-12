@@ -40,12 +40,13 @@ def _zigzag(ax, x0, y0, x1, y1, n=6, amp=0.09, lw=1.1, **kw):
     ax.plot(xs, ys, color="black", lw=lw, solid_capstyle="round", **kw)
 
 
-def _vsource(ax, x, y, label, source_buffer=False):
+def _vsource(ax, x, y, label, source_buffer=False, buffer_r_out=0.0):
     """Circle voltage source, drawn to the left feeding into (x, y).
 
-    If `source_buffer`, an ideal unity-gain buffer is inserted on the wire
-    between the source and (x, y) — the explicit "buffer right at the
-    source" stage (see CrossbarConfig.source_buffer).
+    If `source_buffer`, a unity-gain buffer is inserted on the wire between
+    the source and (x, y) — the explicit "buffer right at the source" stage
+    (see CrossbarConfig.source_buffer). `buffer_r_out` > 0 draws its output
+    resistance as a zigzag instead of a plain wire out of the buffer.
     """
     cx = x - 0.85 if source_buffer else x - 0.55
     ax.add_patch(Circle((cx, y), 0.22, fill=False, lw=1.2, color="black"))
@@ -53,7 +54,10 @@ def _vsource(ax, x, y, label, source_buffer=False):
     if source_buffer:
         bx = (cx + x) / 2 + 0.1
         ax.plot([cx + 0.22, bx - 0.32], [y, y], color="black", lw=1.0)
-        ax.plot([bx + 0.32, x], [y, y], color="black", lw=1.0)
+        if buffer_r_out > 0:
+            _zigzag(ax, bx + 0.32, y, x, y, n=3, amp=0.05, lw=0.8)
+        else:
+            ax.plot([bx + 0.32, x], [y, y], color="black", lw=1.0)
         _buffer(ax, bx, y)
     else:
         ax.plot([cx + 0.22, x], [y, y], color="black", lw=1.0)
@@ -142,13 +146,19 @@ def draw_crossbar(cfg: CrossbarConfig, ax=None, title: str | None = None):
     # --- rows (word lines) ---
     for i in range(n):
         y = row_y[i]
-        _vsource(ax, col_x[0], y, f"V{i}={cfg.v_in[i]:g}V", source_buffer=cfg.source_buffer)
+        _vsource(
+            ax, col_x[0], y, f"V{i}={cfg.v_in[i]:g}V",
+            source_buffer=cfg.source_buffer, buffer_r_out=cfg.buffer_r_out,
+        )
         for j in range(1, m):
             x0, x1 = col_x[j - 1], col_x[j]
             if cfg.is_buffered_step(j):
                 bx = (x0 + x1) / 2
                 ax.plot([x0, bx - 0.32], [y, y], color="black", lw=1.0)
-                ax.plot([bx + 0.32, x1], [y, y], color="black", lw=1.0)
+                if cfg.buffer_r_out > 0:
+                    _zigzag(ax, bx + 0.32, y, x1, y, n=3, amp=0.05, lw=0.8)
+                else:
+                    ax.plot([bx + 0.32, x1], [y, y], color="black", lw=1.0)
                 _buffer(ax, bx, y)
             else:
                 # Interconnect (word-line) wire resistance R_row.

@@ -35,12 +35,14 @@ the drawn figure never drift apart.
 
 ## Compensation methods implemented
 
-- **`wl_buffer_full`** — full row (word-line) compensation: an ideal
-  unity-gain buffer sits right at the row's signal source
-  (`source_buffer=True`) and another before *every* crosspoint
-  (`buffer_interval=1`), instead of a passive `R_row` segment. Every
-  crosspoint then sees the row's intended `V_i` exactly, fully eliminating
-  row IR-drop. This is the current focus experiment.
+- **`wl_buffer_full`** — full row (word-line) compensation: a unity-gain
+  buffer sits right at the row's signal source (`source_buffer=True`) and
+  another before *every* crosspoint (`buffer_interval=1`), instead of a
+  passive `R_row` segment. With an ideal buffer (`buffer_r_out=0`, the
+  default) every crosspoint then sees the row's intended `V_i` exactly,
+  fully eliminating row IR-drop. `buffer_r_out > 0` gives every buffer a
+  finite output (series) resistance instead, to see how much of that
+  compensation survives with a real (non-ideal) driver.
 - **`bl_star`** — each crosspoint gets its own dedicated wire straight to
   the column's virtual ground (resistance proportional to its distance
   from the bottom), instead of a shared chain of `R_col` segments. This
@@ -64,7 +66,7 @@ pip install -r requirements.txt
 ## Usage
 
 ```
-python3 examples/run_demo.py --rows 8 --cols 8 --r-line 10 --r-cell 1000 --v-in 0.7
+python3 examples/run_demo.py --rows 8 --cols 8 --r-line 10 --r-cell 1000 --v-in 0.7 --buffer-r-out 0
 ```
 
 The default experiment uses uniform inputs and cell values (`V_in=0.7V`,
