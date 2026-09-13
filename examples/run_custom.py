@@ -1,8 +1,8 @@
 """Custom crossbar run with parameters set directly in code (no CLI flags).
 
 Edit the block below to set per-cell resistances (can differ from crosspoint
-to crosspoint), per-row input voltages, wire (line) resistance, and WL buffer
-output resistance, then just run:
+to crosspoint), per-row input voltages, wire (line) resistance, WL buffer
+output resistance, and the shared bit-line-end resistance, then just run:
 
     python3 examples/run_custom.py
 """
@@ -41,6 +41,11 @@ R_COL = 10.0  # bit-line (column) segment
 # Output resistance of the WL buffers/inverters, ohms (0 = ideal buffer).
 BUFFER_R_OUT = 0.0
 
+# Shared bit-line-end resistance per column, ohms (0 = none) -- the routing
+# from the array edge to the peripheral read circuit, common to every cell
+# in a column, distinct from the per-cell R_COL pitch.
+R_COL_END = 0.0
+
 # ---------------------------------------------------------------------------
 
 
@@ -53,10 +58,12 @@ def main() -> None:
         raise ValueError(f"V_IN must have {r.shape[0]} entries (one per row), got {v_in.shape[0]}")
 
     g = 1.0 / r
-    cfg = CrossbarConfig(g=g, v_in=v_in, r_row=R_ROW, r_col=R_COL, buffer_r_out=BUFFER_R_OUT)
+    cfg = CrossbarConfig(
+        g=g, v_in=v_in, r_row=R_ROW, r_col=R_COL, buffer_r_out=BUFFER_R_OUT, r_col_end=R_COL_END
+    )
 
     print(f"Crossbar: {cfg.n_rows}x{cfg.n_cols}, R_row={R_ROW} ohm, R_col={R_COL} ohm, "
-          f"buffer_r_out={BUFFER_R_OUT} ohm")
+          f"buffer_r_out={BUFFER_R_OUT} ohm, r_col_end={R_COL_END} ohm")
     print(f"V_in = {v_in}")
     print(f"R_cells =\n{r}\n")
 
