@@ -30,14 +30,24 @@ class VariantResult:
     rmse: float
     max_abs_error: float
     max_rel_error: float
+    mean_rel_error: float
 
 
-def _errors(ideal: np.ndarray, measured: np.ndarray) -> tuple[float, float, float]:
+def _errors(ideal: np.ndarray, measured: np.ndarray) -> tuple[float, float, float, float]:
+    """RMSE and max are single worst-case-flavoured summaries (RMSE is
+    absolute, in amps, and dominated by whichever column is off by most in
+    absolute terms; max_rel_error is the single worst column's relative
+    error). mean_rel_error averages the relative error across every
+    column instead, which is usually the more representative number for
+    "how well does this compensate overall" rather than "how bad can it
+    get on one column"."""
     err = measured - ideal
+    rel = np.abs(err) / np.abs(ideal)
     rmse = float(np.sqrt(np.mean(err**2)))
     max_abs = float(np.max(np.abs(err)))
-    max_rel = float(np.max(np.abs(err) / np.abs(ideal)))
-    return rmse, max_abs, max_rel
+    max_rel = float(np.max(rel))
+    mean_rel = float(np.mean(rel))
+    return rmse, max_abs, max_rel, mean_rel
 
 
 def evaluate_variant(label: str, cfg: CrossbarConfig, ideal: np.ndarray) -> VariantResult:
@@ -46,9 +56,10 @@ def evaluate_variant(label: str, cfg: CrossbarConfig, ideal: np.ndarray) -> Vari
     examples/run_wl_buffer_interval_sweep.py) can build their own variant
     sets without duplicating the ngspice-run + error-metric plumbing."""
     currents = run_variant(cfg)
-    rmse, max_abs, max_rel = _errors(ideal, currents)
+    rmse, max_abs, max_rel, mean_rel = _errors(ideal, currents)
     return VariantResult(
-        label=label, currents=currents, rmse=rmse, max_abs_error=max_abs, max_rel_error=max_rel
+        label=label, currents=currents, rmse=rmse, max_abs_error=max_abs,
+        max_rel_error=max_rel, mean_rel_error=mean_rel,
     )
 
 
@@ -81,8 +92,14 @@ def compare_all(base_cfg: CrossbarConfig) -> list[VariantResult]:
 def print_report(ideal: np.ndarray, results: list[VariantResult]) -> None:
     print(f"Ideal (R_line=0) column currents: {np.array2string(ideal, precision=6)}")
     print()
-    header = f"{'variant':<12}{'RMSE (A)':>14}{'max |err| (A)':>16}{'max rel err':>14}"
+    header = (
+        f"{'variant':<16}{'RMSE (A)':>14}{'max |err| (A)':>16}"
+        f"{'mean rel err':>14}{'max rel err':>14}"
+    )
     print(header)
     print("-" * len(header))
     for r in results:
-        print(f"{r.label:<12}{r.rmse:>14.3e}{r.max_abs_error:>16.3e}{r.max_rel_error:>14.2%}")
+        print(
+            f"{r.label:<16}{r.rmse:>14.3e}{r.max_abs_error:>16.3e}"
+            f"{r.mean_rel_error:>14.2%}{r.max_rel_error:>14.2%}"
+        )

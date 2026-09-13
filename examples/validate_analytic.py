@@ -99,18 +99,19 @@ def main() -> None:
     # whole point of --sparse existing, so don't defeat it at large sizes.
     compare_dense = args.sparse and args.rows * args.cols <= 4096
 
-    cols = ["variant", "max rel err vs ideal"]
+    cols = ["variant", "mean rel err", "max rel err vs ideal"]
     if not args.skip_ngspice:
         cols.append("max |ngspice - MNA| (A)")
     if compare_dense:
         cols.append("max |dense - sparse| (A)")
-    header = f"{cols[0]:<34}{cols[1]:>22}" + "".join(f"{c:>28}" for c in cols[2:])
+    header = f"{cols[0]:<34}{cols[1]:>16}{cols[2]:>22}" + "".join(f"{c:>28}" for c in cols[3:])
     print(header)
     print("-" * len(header))
     for name, cfg in variants.items():
         an = primary(cfg)
         ideal = ideal_vmm(cfg)
-        row = f"{name:<34}{np.max(np.abs(an - ideal) / np.abs(ideal)):>21.2%}"
+        rel = np.abs(an - ideal) / np.abs(ideal)
+        row = f"{name:<34}{np.mean(rel):>15.2%}{np.max(rel):>22.2%}"
         if not args.skip_ngspice:
             ng = run_variant(cfg)
             row += f"{np.max(np.abs(ng - an)):>28.3e}"

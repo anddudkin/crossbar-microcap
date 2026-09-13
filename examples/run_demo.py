@@ -66,20 +66,20 @@ def main() -> None:
     csv_path = args.out / "vmm_comparison.csv"
     with open(csv_path, "w", newline="") as f:
         writer = csv.writer(f)
-        writer.writerow(["variant", "rmse_A", "max_abs_error_A", "max_rel_error"])
+        writer.writerow(["variant", "rmse_A", "max_abs_error_A", "mean_rel_error", "max_rel_error"])
         for r in results:
-            writer.writerow([r.label, r.rmse, r.max_abs_error, r.max_rel_error])
+            writer.writerow([r.label, r.rmse, r.max_abs_error, r.mean_rel_error, r.max_rel_error])
     print(f"\nSaved {csv_path}")
 
     # --- bar chart of error metrics ---
     labels = [r.label for r in results]
-    rmse = [r.rmse for r in results]
+    mean_rel = [r.mean_rel_error * 100 for r in results]
     max_rel = [r.max_rel_error * 100 for r in results]
 
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(9, 4))
-    ax1.bar(labels, rmse, color="#4C72B0")
-    ax1.set_ylabel("RMSE (A)")
-    ax1.set_title("VMM output RMSE vs ideal")
+    ax1.bar(labels, mean_rel, color="#4C72B0")
+    ax1.set_ylabel("mean relative error (%)")
+    ax1.set_title("Average column error")
     ax1.tick_params(axis="x", rotation=20)
 
     ax2.bar(labels, max_rel, color="#DD8452")

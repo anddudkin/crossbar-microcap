@@ -51,7 +51,10 @@ def main() -> None:
           f"R_cell={args.r_cell} ohm, V_in={args.v_in} V\n")
     print(f"Ideal (R_line=0) column currents: {np.array2string(ideal, precision=6)}\n")
 
-    header = f"{'buffer_interval':<16}{'RMSE (A)':>14}{'max |err| (A)':>16}{'max rel err':>14}"
+    header = (
+        f"{'buffer_interval':<16}{'RMSE (A)':>14}{'max |err| (A)':>16}"
+        f"{'mean rel err':>14}{'max rel err':>14}"
+    )
     print(header)
     print("-" * len(header))
 
@@ -59,13 +62,18 @@ def main() -> None:
     for k in args.intervals:
         cfg = replace(base_cfg, buffer_interval=k, source_buffer=False, star_columns=False)
         result = evaluate_variant(f"interval_{k}", cfg, ideal)
-        print(f"{k:<16}{result.rmse:>14.3e}{result.max_abs_error:>16.3e}{result.max_rel_error:>14.2%}")
-        rows_out.append((k, result.rmse, result.max_abs_error, result.max_rel_error))
+        print(
+            f"{k:<16}{result.rmse:>14.3e}{result.max_abs_error:>16.3e}"
+            f"{result.mean_rel_error:>14.2%}{result.max_rel_error:>14.2%}"
+        )
+        rows_out.append(
+            (k, result.rmse, result.max_abs_error, result.mean_rel_error, result.max_rel_error)
+        )
 
     csv_path = args.out / "wl_buffer_interval_sweep.csv"
     with open(csv_path, "w", newline="") as f:
         writer = csv.writer(f)
-        writer.writerow(["buffer_interval", "rmse_A", "max_abs_error_A", "max_rel_error"])
+        writer.writerow(["buffer_interval", "rmse_A", "max_abs_error_A", "mean_rel_error", "max_rel_error"])
         writer.writerows(rows_out)
     print(f"\nSaved {csv_path}")
 
