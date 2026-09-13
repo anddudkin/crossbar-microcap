@@ -23,8 +23,8 @@ from crossbar.schematic import save_schematic
 # Parameters -- edit these directly.
 # ---------------------------------------------------------------------------
 
-N_ROWS = 4
-N_COLS = 4
+N_ROWS = 8
+N_COLS = 8
 
 R_CELL = 1000.0  # ohms, uniform crosspoint cell resistance
 V_IN = 0.7  # volts, uniform row input voltage
@@ -33,10 +33,10 @@ R_ROW = 10.0  # word-line (row) segment resistance, ohms
 R_COL = 10.0  # bit-line (column) segment resistance, ohms
 
 # Compensation flags -- see CrossbarConfig in crossbar/topology.py.
-BUFFER_INTERVAL = 0  # 0 = no periodic WL buffering; N = buffer every Nth crosspoint
-SOURCE_BUFFER = False  # True + BUFFER_INTERVAL=1 = full WL compensation
+BUFFER_INTERVAL = 1  # 0 = no periodic WL buffering; N = buffer every Nth crosspoint
+SOURCE_BUFFER = True  # True + BUFFER_INTERVAL=1 = full WL compensation
 BUFFER_R_OUT = 0.0  # ohms, output resistance of every buffer (0 = ideal)
-STAR_COLUMNS = False  # True = dedicated per-cell column wiring (BL compensation)
+STAR_COLUMNS = True  # True = dedicated per-cell column wiring (BL compensation)
 R_COL_END = 0.0  # ohms, shared bit-line-end resistance (0 = none)
 
 OUT_DIR = Path(__file__).resolve().parent.parent / "out" / "schematics"
