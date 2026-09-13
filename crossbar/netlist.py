@@ -67,13 +67,23 @@ def generate_netlist(cfg: CrossbarConfig, title: str | None = None) -> str:
     # --- Column (bit line) wiring ---
     for j in range(m):
         bottom = cfg.col_bottom(j)
+        # Shared final bit-line stretch (routing from the array edge to the
+        # sense amp) every cell in this column has in common, distinct from
+        # the per-cell R_col pitch. Only emitted when non-zero, so the
+        # default (0) reproduces the old netlist exactly.
+        if cfg.r_col_end > 0:
+            end = cfg.col_end(j)
+            lines.append(f"Rcolend_{j} {end} {bottom} {_fmt(cfg.r_col_end)}")
+        else:
+            end = bottom
+
         if cfg.star_columns:
-            # Dedicated wire per cell straight to the virtual ground node;
+            # Dedicated wire per cell straight to the shared end node;
             # resistance scales with physical distance from the bottom.
             for i in range(n):
                 dist = n - i  # segments from crosspoint i to the bottom
                 lines.append(
-                    f"Rcol_{j}_{i} {cfg.col_node(j, i)} {bottom} {_fmt(cfg.r_col * dist)}"
+                    f"Rcol_{j}_{i} {cfg.col_node(j, i)} {end} {_fmt(cfg.r_col * dist)}"
                 )
         else:
             for i in range(n - 1):
@@ -81,7 +91,7 @@ def generate_netlist(cfg: CrossbarConfig, title: str | None = None) -> str:
                     f"Rcol_{j}_{i} {cfg.col_node(j, i)} {cfg.col_node(j, i + 1)} {_fmt(cfg.r_col)}"
                 )
             lines.append(
-                f"Rcol_{j}_{n - 1} {cfg.col_node(j, n - 1)} {bottom} {_fmt(cfg.r_col)}"
+                f"Rcol_{j}_{n - 1} {cfg.col_node(j, n - 1)} {end} {_fmt(cfg.r_col)}"
             )
         # Virtual ground (ideal TIA): 0 V source, its current is the VMM output.
         lines.append(f"Vsense_{j} {bottom} 0 DC 0")

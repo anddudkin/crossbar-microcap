@@ -230,14 +230,20 @@ def _populate(cfg: CrossbarConfig, mna) -> None:
 
     for j in range(m):
         bottom = cfg.col_bottom(j)
+        if cfg.r_col_end > 0:
+            end = cfg.col_end(j)
+            mna.resistor(end, bottom, cfg.r_col_end)
+        else:
+            end = bottom
+
         if cfg.star_columns:
             for i in range(n):
                 dist = n - i
-                mna.resistor(cfg.col_node(j, i), bottom, cfg.r_col * dist)
+                mna.resistor(cfg.col_node(j, i), end, cfg.r_col * dist)
         else:
             for i in range(n - 1):
                 mna.resistor(cfg.col_node(j, i), cfg.col_node(j, i + 1), cfg.r_col)
-            mna.resistor(cfg.col_node(j, n - 1), bottom, cfg.r_col)
+            mna.resistor(cfg.col_node(j, n - 1), end, cfg.r_col)
         mna.vsource(bottom, 0.0, tag=f"vsense_{j}")
 
 

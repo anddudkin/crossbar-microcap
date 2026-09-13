@@ -8,11 +8,17 @@ Three things are checked:
    without a non-ideal buffer_r_out — this is a correctness check on the
    SPICE netlist itself, not an approximation, since the network is linear
    and both methods solve the same equations exactly.
-2. For combined_full specifically, both agree with the closed-form formula
-   I_j = sum_i V_i / (R_cell_ij + R_col * (n - i)) — the exact result once
-   WL IR-drop is fully cancelled (source_buffer + buffer_interval=1) and BL
-   cross-coupling is removed (star_columns), leaving only each cell's own
-   (uncoupled) voltage divider against its dedicated column resistance.
+2. For combined_full specifically, both agree with a closed-form formula.
+   With r_col_end=0, I_j = sum_i V_i / (R_cell_ij + R_col * (n - i)) — the
+   exact result once WL IR-drop is fully cancelled
+   (source_buffer + buffer_interval=1) and BL cross-coupling is removed
+   (star_columns), leaving only each cell's own (uncoupled) voltage
+   divider against its dedicated column resistance. r_col_end > 0
+   reintroduces some cross-cell coupling (every cell in a column shares
+   that one resistor), so the general formula instead treats it as n
+   Norton sources (branch resistance R_i = R_cell_ij + R_col*(n-i))
+   feeding a shared merge node through r_col_end to the virtual ground —
+   see closed_form_combined_full.
 3. With --sparse, the dense (`solve_analytic`) and sparse
    (`solve_analytic_sparse`) MNA backends agree with each other too — the
    sparse backend is what makes arrays too large for ngspice/dense MNA
@@ -41,10 +47,27 @@ from crossbar.analytic import solve_analytic, solve_analytic_sparse
 
 
 def closed_form_combined_full(cfg: CrossbarConfig) -> np.ndarray:
+    """Exact combined_full column currents in closed form.
+
+    Each cell (i, j) is a Norton source V_i through branch resistance
+    R_i = R_cell_ij + R_col*(n-i) (WL fully compensated, BL cross-coupling
+    removed by star_columns). With r_col_end=0 these branches go straight
+    to the ideal 0V sense node, so they're fully independent: I_j = sum_i
+    V_i/R_i. With r_col_end>0 they instead all meet at one shared merge
+    node before a common r_col_end resistor to the sense node, which
+    reintroduces coupling: solving that node by KCL (Millman's theorem)
+    gives merge voltage V_m = sum_i(V_i/R_i) / (sum_i(1/R_i) + 1/r_col_end),
+    and the column's sense current is I_j = V_m / r_col_end.
+    """
     n = cfg.n_rows
     dist = (n - np.arange(n))[:, None]  # (n, 1), distance-to-bottom per row
     r_cell = 1.0 / cfg.g  # (n, m)
-    return np.sum(cfg.v_in[:, None] / (r_cell + cfg.r_col * dist), axis=0)
+    r_branch = r_cell + cfg.r_col * dist  # (n, m)
+    weighted = cfg.v_in[:, None] / r_branch
+    if cfg.r_col_end > 0:
+        v_merge = weighted.sum(axis=0) / ((1.0 / r_branch).sum(axis=0) + 1.0 / cfg.r_col_end)
+        return v_merge / cfg.r_col_end
+    return weighted.sum(axis=0)
 
 
 def main() -> None:
@@ -54,6 +77,9 @@ def main() -> None:
     ap.add_argument("--r-line", type=float, default=10.0)
     ap.add_argument("--r-cell", type=float, default=1000.0)
     ap.add_argument("--v-in", type=float, default=0.7)
+    ap.add_argument("--r-col-end", type=float, default=30.0,
+                     help="ohms of shared bit-line-end resistance to exercise in the combined_full "
+                          "(r_col_end) variant below")
     ap.add_argument("--seed", type=int, default=0, help="use a random (non-uniform) array instead of uniform")
     ap.add_argument("--random", action="store_true", help="randomize g/v_in instead of using uniform values")
     ap.add_argument("--sparse", action="store_true",
@@ -86,6 +112,9 @@ def main() -> None:
         ),
         "combined_full (buffer_r_out=5)": replace(
             base, buffer_interval=1, source_buffer=True, star_columns=True, buffer_r_out=5.0
+        ),
+        f"combined_full (r_col_end={args.r_col_end})": replace(
+            base, buffer_interval=1, source_buffer=True, star_columns=True, r_col_end=args.r_col_end
         ),
     }
 
@@ -120,17 +149,18 @@ def main() -> None:
             row += f"{np.max(np.abs(an - dense)):>28.3e}"
         print(row)
 
-    print("\ncombined_full vs closed-form I_j = sum_i V_i/(R_cell_ij + R_col*(n-i)):")
-    cf_cfg = variants["combined_full"]
-    closed = closed_form_combined_full(cf_cfg)
-    an = primary(cf_cfg)
-    print(f"  closed-form : {np.array2string(closed, precision=8)}")
-    print(f"  MNA         : {np.array2string(an, precision=8)}")
-    if not args.skip_ngspice:
-        ng = run_variant(cf_cfg)
-        print(f"  ngspice     : {np.array2string(ng, precision=8)}")
-        print(f"  max |closed-form - ngspice| = {np.max(np.abs(closed - ng)):.3e} A")
-    print(f"  max |closed-form - MNA| = {np.max(np.abs(closed - an)):.3e} A")
+    for label in ("combined_full", f"combined_full (r_col_end={args.r_col_end})"):
+        print(f"\n{label} vs closed-form (see closed_form_combined_full docstring):")
+        cf_cfg = variants[label]
+        closed = closed_form_combined_full(cf_cfg)
+        an = primary(cf_cfg)
+        print(f"  closed-form : {np.array2string(closed, precision=8)}")
+        print(f"  MNA         : {np.array2string(an, precision=8)}")
+        if not args.skip_ngspice:
+            ng = run_variant(cf_cfg)
+            print(f"  ngspice     : {np.array2string(ng, precision=8)}")
+            print(f"  max |closed-form - ngspice| = {np.max(np.abs(closed - ng)):.3e} A")
+        print(f"  max |closed-form - MNA| = {np.max(np.abs(closed - an)):.3e} A")
 
 
 if __name__ == "__main__":

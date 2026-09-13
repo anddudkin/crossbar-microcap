@@ -119,6 +119,17 @@ Compensation methods are not separate code paths but flags on the same
   a dedicated resistor from each crosspoint straight to the column's
   virtual ground (length/resistance scales with distance from the
   bottom), removing shared-wire coupling between cells in a column.
+- `r_col_end` (default 0) adds one shared resistor per column — the array
+  edge to peripheral-circuit routing, distinct from the per-cell `r_col`
+  pitch — between whatever the column's own wiring produces (chain or
+  star) and the virtual ground; only emitted (with an intermediate
+  `cfg.col_end(j)` node) when > 0, so the default reproduces the old
+  netlist exactly. This is emitted *after* star_columns' per-cell
+  resistors, so it reintroduces coupling between cells in the same column
+  that star_columns otherwise removes — every cell shares this one
+  resistor. `examples/validate_analytic.py`'s `closed_form_combined_full`
+  has the generalized (Millman's theorem) formula for this case, verified
+  to agree with ngspice/MNA to floating-point precision via `--r-col-end`.
 - `compare.variant_configs(base_cfg)` returns the four combinations of the
   *full* WL method with `star_columns` as a `{label: CrossbarConfig}` dict
   (baseline / wl_buffer_full / bl_star / combined_full); `compare_all`
@@ -150,7 +161,12 @@ wire resistance wasn't modelled at all, which it always was (in the
 netlist) even when the picture didn't show it. Crosspoint cells are drawn
 as a labelled box (`G_i,j` + a small pulse-waveform icon) rather than a
 resistor zigzag, matching the crossbar figures common in ReRAM/memristor
-papers.
+papers. `r_col_end > 0` draws one extra zigzag per column (labelled
+`R_end`, separated from the last per-cell zigzag by a short plain lead so
+they read as two components, not one) between the column's own wiring and
+the TIA — `_bottom_y(cfg, row_y)` grows the figure to fit it, used
+consistently by both `draw_crossbar` and `save_schematic` so their
+computed sizes never disagree.
 
 `examples/run_demo.py` is the orchestration script (CLI flags for array
 size, line/cell resistance, input voltage) and the reference for how the

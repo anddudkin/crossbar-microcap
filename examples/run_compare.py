@@ -59,6 +59,8 @@ def main() -> None:
     ap.add_argument("--v-in", type=float, default=0.7, help="volts on every row source")
     ap.add_argument("--buffer-r-out", type=float, default=0.0,
                      help="ohms of output resistance for every WL buffer (0 = ideal buffer)")
+    ap.add_argument("--r-col-end", type=float, default=0.0,
+                     help="ohms of shared bit-line-end resistance before the sense amp (0 = none)")
     ap.add_argument("--random", action="store_true", help="randomize g/v_in instead of using uniform values")
     ap.add_argument("--seed", type=int, default=0, help="seed for --random")
     ap.add_argument("--variants", nargs="+", choices=ALL_VARIANTS, default=ALL_VARIANTS,
@@ -79,12 +81,14 @@ def main() -> None:
         v_in = np.full(args.rows, args.v_in)
 
     base_cfg = CrossbarConfig(
-        g=g, v_in=v_in, r_row=args.r_line, r_col=args.r_line, buffer_r_out=args.buffer_r_out
+        g=g, v_in=v_in, r_row=args.r_line, r_col=args.r_line,
+        buffer_r_out=args.buffer_r_out, r_col_end=args.r_col_end,
     )
 
     print(f"Crossbar: {args.rows}x{args.cols}, R_line={args.r_line} ohm/segment, "
           f"R_cell={args.r_cell} ohm, V_in={args.v_in} V, buffer_r_out={args.buffer_r_out} ohm, "
-          f"backend={args.backend}, {'random' if args.random else 'uniform'} array\n")
+          f"r_col_end={args.r_col_end} ohm, backend={args.backend}, "
+          f"{'random' if args.random else 'uniform'} array\n")
 
     ideal = ideal_vmm(base_cfg)
     print(f"Ideal (R_line=0) column currents: {np.array2string(ideal, precision=6)}\n")

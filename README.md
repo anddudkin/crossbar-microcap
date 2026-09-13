@@ -23,8 +23,12 @@ programmatically.
 - **Columns (bit lines)**: terminated by an ideal transimpedance amplifier,
   modelled as a 0 V source to ground (virtual ground). Its branch current
   is the VMM output for that column: `I_j = sum_i V_i * G_ij` in the ideal
-  (zero wire resistance) case.
-- With non-zero `R_row`/`R_col`, the array becomes a resistive network
+  (zero wire resistance) case. `R_col_end` (default 0) adds one more
+  resistor per column, shared by every cell, between the array's own
+  bit-line wiring and that virtual ground — the routing from the edge of
+  the array to the peripheral read circuit, which is physically a separate
+  piece of wire from the per-cell `R_col` pitch.
+- With non-zero `R_row`/`R_col`/`R_col_end`, the array becomes a resistive network
   whose exact solution is what ngspice's `.op` analysis computes — this
   is where IR-drop shows up as deviation from the ideal VMM result.
 
@@ -46,7 +50,11 @@ the drawn figure never drift apart.
 - **`bl_star`** — each crosspoint gets its own dedicated wire straight to
   the column's virtual ground (resistance proportional to its distance
   from the bottom), instead of a shared chain of `R_col` segments. This
-  removes cross-cell coupling through shared bit-line resistance.
+  removes cross-cell coupling through shared bit-line resistance — except
+  for `R_col_end` if set, which by definition every cell in the column
+  still shares (see closed_form_combined_full in validate_analytic.py for
+  the exact effect this has on combined_full's otherwise-independent
+  per-cell dividers).
 - **`combined_full`** — both of the above together.
 - **`baseline`** — plain resistive crossbar, no compensation, for reference.
 
@@ -101,6 +109,7 @@ use `examples/run_compare.py`:
 python3 examples/run_compare.py --r-line 1 --r-cell 10000 --v-in 0.7
 python3 examples/run_compare.py --variants baseline combined_full
 python3 examples/run_compare.py --rows 128 --cols 128 --r-line 1 --r-cell 10000 --backend sparse
+python3 examples/run_compare.py --r-col-end 50 --variants bl_star combined_full
 python3 examples/run_compare.py --csv out/my_comparison.csv
 ```
 
@@ -127,11 +136,18 @@ resistance):
 I_j = sum_i  V_i / (R_cell_ij + R_col * (n - i))
 ```
 
+With `R_col_end > 0` every cell in a column shares that one extra
+resistor, which reintroduces some coupling, so the formula generalizes to
+treating the column as n Norton sources feeding a shared merge node
+through `R_col_end` (Millman's theorem) — see the
+`closed_form_combined_full` docstring in `validate_analytic.py`.
+
 Run the cross-check:
 
 ```
 python3 examples/validate_analytic.py --rows 8 --cols 8 --r-line 10 --r-cell 1000 --v-in 0.7
 python3 examples/validate_analytic.py --rows 32 --cols 32 --random --seed 3
+python3 examples/validate_analytic.py --r-col-end 30
 ```
 
 On both uniform and randomized arrays up to 32x32 this comes back with

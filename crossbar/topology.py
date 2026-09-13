@@ -40,6 +40,17 @@ Compensation methods
   to the column's virtual ground (length proportional to its distance from
   the bottom), instead of a shared chain of R_col segments. This removes
   cross-cell coupling through shared bit-line resistance.
+- r_col_end (default 0): resistance of the final bit-line stretch that
+  every cell in a column shares on the way to the sense amplifier — the
+  routing from the edge of the array to the peripheral read circuit, which
+  is physically a separate piece of wire from the per-cell R_col pitch
+  (and, in star_columns mode, is the one segment every cell's otherwise
+  independent dedicated wire still has in common). 0 omits it entirely
+  (no extra node/resistor emitted, so existing netlists are unaffected).
+  Note this reintroduces some cross-cell coupling in star_columns mode
+  (all cells in a column share this one resistor), so combined_full's
+  closed-form formula (see examples/validate_analytic.py) needs the
+  generalized version once r_col_end > 0.
 
 Any of these can be combined with star_columns = True.
 """
@@ -59,6 +70,7 @@ class CrossbarConfig:
     source_buffer: bool = False  # True inserts an ideal buffer right at the row's signal source
     buffer_r_out: float = 0.0  # ohms of output (series) resistance for every buffer; 0 = ideal
     star_columns: bool = False  # True enables per-cell dedicated column wiring
+    r_col_end: float = 0.0  # ohms of shared bit-line-end resistance before the sense amp; 0 = none
     name: str = "crossbar"
 
     def __post_init__(self) -> None:
@@ -74,6 +86,8 @@ class CrossbarConfig:
             raise ValueError("buffer_interval must be >= 0")
         if self.buffer_r_out < 0:
             raise ValueError("buffer_r_out must be >= 0")
+        if self.r_col_end < 0:
+            raise ValueError("r_col_end must be >= 0")
 
     @property
     def n_rows(self) -> int:
@@ -107,6 +121,12 @@ class CrossbarConfig:
 
     def col_bottom(self, j: int) -> str:
         return f"bot_{j}"
+
+    def col_end(self, j: int) -> str:
+        """Node where every cell in column j's wiring meets the shared
+        bit-line-end resistor (r_col_end), before the sense amp. Only
+        meaningful (i.e. distinct from col_bottom) when r_col_end > 0."""
+        return f"blend_{j}"
 
     def is_buffered_step(self, j: int) -> bool:
         """Whether the transition into crosspoint j (from j-1) uses a buffer."""

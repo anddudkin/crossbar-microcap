@@ -22,6 +22,12 @@ _CELL_DROP = 0.6  # fraction of _ROW_PITCH from the row wire down to the column 
 _LEFT_MARGIN = 2.0
 _BOTTOM_MARGIN = 1.6
 _TOP_MARGIN = 0.6
+_END_R_EXTRA = 0.6  # extra bottom space to fit a visibly separate r_col_end zigzag
+
+
+def _bottom_y(cfg: CrossbarConfig, row_y: list[float]) -> float:
+    extra = _END_R_EXTRA if cfg.r_col_end > 0 else 0.0
+    return row_y[-1] + _BOTTOM_MARGIN + extra
 
 
 def _zigzag(ax, x0, y0, x1, y1, n=6, amp=0.09, lw=1.1, **kw):
@@ -135,13 +141,14 @@ def _tia(ax, x, y_top, y_bottom, label):
 def draw_crossbar(cfg: CrossbarConfig, ax=None, title: str | None = None):
     n, m = cfg.n_rows, cfg.n_cols
     if ax is None:
+        row_y_tmp = [_TOP_MARGIN + i * _ROW_PITCH for i in range(n)]
         _, ax = plt.subplots(
-            figsize=(_LEFT_MARGIN + m * _COL_PITCH + 1.5, _TOP_MARGIN + n * _ROW_PITCH + _BOTTOM_MARGIN)
+            figsize=(_LEFT_MARGIN + m * _COL_PITCH + 1.5, _bottom_y(cfg, row_y_tmp) + 0.9)
         )
 
     col_x = [_LEFT_MARGIN + j * _COL_PITCH for j in range(m)]
     row_y = [_TOP_MARGIN + i * _ROW_PITCH for i in range(n)]  # row 0 at top after invert
-    bottom_y = row_y[-1] + _BOTTOM_MARGIN
+    bottom_y = _bottom_y(cfg, row_y)
 
     # --- rows (word lines) ---
     for i in range(n):
@@ -172,6 +179,13 @@ def draw_crossbar(cfg: CrossbarConfig, ax=None, title: str | None = None):
             _memristor_box(ax, x, y, y + _ROW_PITCH * _CELL_DROP, f"G{i + 1},{j + 1}")
 
     # --- columns (bit lines) ---
+    has_end_r = cfg.r_col_end > 0
+    last_cell_bottom_y = row_y[-1] + _ROW_PITCH * _CELL_DROP
+    # Shared merge/end-node height: midpoint of the space below the last row,
+    # so the per-cell zigzag and the r_col_end zigzag each get roughly equal,
+    # visually distinguishable room (rather than a fixed offset from
+    # bottom_y, which would leave the r_col_end zigzag cramped).
+    end_y = (last_cell_bottom_y + bottom_y) / 2 if has_end_r else bottom_y - 0.35
     for j in range(m):
         x = col_x[j]
         cell_bottom_y = [row_y[i] + _ROW_PITCH * _CELL_DROP for i in range(n)]
@@ -179,7 +193,7 @@ def draw_crossbar(cfg: CrossbarConfig, ax=None, title: str | None = None):
             # Individual dedicated wire per cell: jog right into its own lane,
             # run down, then jog back to a common bus just above the TIA so
             # the picture makes clear these never share a segment.
-            merge_y = bottom_y - 0.35
+            merge_y = end_y
             for i in range(n):
                 fan_x = x + 0.16 + 0.11 * i
                 ax.plot([x, fan_x], [cell_bottom_y[i], cell_bottom_y[i]], color="black", lw=0.9)
@@ -191,8 +205,19 @@ def draw_crossbar(cfg: CrossbarConfig, ax=None, title: str | None = None):
             for i in range(n - 1):
                 # Interconnect (bit-line) wire resistance R_col.
                 _zigzag(ax, x, cell_bottom_y[i], x, row_y[i + 1], n=4, amp=0.06, lw=0.9)
-            _zigzag(ax, x, cell_bottom_y[-1], x, bottom_y, n=4, amp=0.06, lw=0.9)
-            top_for_tia = cell_bottom_y[-1]
+            last_y = end_y if has_end_r else bottom_y
+            _zigzag(ax, x, cell_bottom_y[-1], x, last_y, n=4, amp=0.06, lw=0.9)
+            top_for_tia = last_y
+        if has_end_r:
+            # Shared bit-line-end resistance (r_col_end), common to every
+            # cell in this column, distinct from the per-cell R_col zigzags.
+            # A short plain lead separates the two zigzags visually so they
+            # don't read as one longer resistor.
+            gap = 0.1
+            ax.plot([x, x], [top_for_tia, top_for_tia + gap], color="black", lw=1.0)
+            _zigzag(ax, x, top_for_tia + gap, x, bottom_y, n=4, amp=0.07, lw=1.0)
+            ax.text(x + 0.12, (top_for_tia + gap + bottom_y) / 2, "R_end", ha="left", va="center", fontsize=6)
+            top_for_tia = bottom_y
         _tia(ax, x, top_for_tia, bottom_y, f"I{j}")
 
     ax.set_xlim(0, col_x[-1] + 1.5)
@@ -207,8 +232,9 @@ def draw_crossbar(cfg: CrossbarConfig, ax=None, title: str | None = None):
 
 
 def save_schematic(cfg: CrossbarConfig, path_svg: str, path_png: str | None = None, title: str | None = None) -> None:
+    row_y = [_TOP_MARGIN + i * _ROW_PITCH for i in range(cfg.n_rows)]
     fig_w = _LEFT_MARGIN + cfg.n_cols * _COL_PITCH + 1.5
-    fig_h = _TOP_MARGIN + cfg.n_rows * _ROW_PITCH + _BOTTOM_MARGIN
+    fig_h = _bottom_y(cfg, row_y) + 0.9
     fig, ax = plt.subplots(figsize=(fig_w, fig_h))
     draw_crossbar(cfg, ax=ax, title=title)
     fig.tight_layout()

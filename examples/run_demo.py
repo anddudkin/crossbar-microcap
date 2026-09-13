@@ -18,7 +18,6 @@ from __future__ import annotations
 import argparse
 import csv
 import sys
-from dataclasses import replace
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -30,7 +29,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from crossbar.topology import CrossbarConfig
-from crossbar.compare import ideal_vmm, compare_all, print_report
+from crossbar.compare import ideal_vmm, compare_all, print_report, variant_configs
 from crossbar.schematic import save_schematic
 
 
@@ -43,6 +42,8 @@ def main() -> None:
     ap.add_argument("--v-in", type=float, default=0.7, help="volts on every row source")
     ap.add_argument("--buffer-r-out", type=float, default=0.0,
                      help="ohms of output resistance for every WL buffer (0 = ideal buffer)")
+    ap.add_argument("--r-col-end", type=float, default=0.0,
+                     help="ohms of shared bit-line-end resistance before the sense amp (0 = none)")
     ap.add_argument("--out", type=Path, default=Path(__file__).resolve().parent.parent / "out")
     ap.add_argument("--schematic-size", type=int, default=4, help="NxN subset size used for illustration schematics")
     args = ap.parse_args()
@@ -52,11 +53,13 @@ def main() -> None:
     g = np.full((args.rows, args.cols), 1.0 / args.r_cell)
     v_in = np.full(args.rows, args.v_in)
     base_cfg = CrossbarConfig(
-        g=g, v_in=v_in, r_row=args.r_line, r_col=args.r_line, buffer_r_out=args.buffer_r_out
+        g=g, v_in=v_in, r_row=args.r_line, r_col=args.r_line,
+        buffer_r_out=args.buffer_r_out, r_col_end=args.r_col_end,
     )
 
     print(f"Crossbar: {args.rows}x{args.cols}, R_line={args.r_line} ohm/segment, "
-          f"R_cell={args.r_cell} ohm, V_in={args.v_in} V, buffer_r_out={args.buffer_r_out} ohm\n")
+          f"R_cell={args.r_cell} ohm, V_in={args.v_in} V, buffer_r_out={args.buffer_r_out} ohm, "
+          f"r_col_end={args.r_col_end} ohm\n")
 
     ideal = ideal_vmm(base_cfg)
     results = compare_all(base_cfg)
@@ -96,14 +99,10 @@ def main() -> None:
     # --- illustrative schematics (small NxN subset, full array is too dense to draw) ---
     k = min(args.schematic_size, args.rows, args.cols)
     illus_cfg = CrossbarConfig(
-        g=g[:k, :k], v_in=v_in[:k], r_row=args.r_line, r_col=args.r_line, buffer_r_out=args.buffer_r_out
+        g=g[:k, :k], v_in=v_in[:k], r_row=args.r_line, r_col=args.r_line,
+        buffer_r_out=args.buffer_r_out, r_col_end=args.r_col_end,
     )
-    variants = {
-        "baseline": replace(illus_cfg, buffer_interval=0, source_buffer=False, star_columns=False),
-        "wl_buffer_full": replace(illus_cfg, buffer_interval=1, source_buffer=True, star_columns=False),
-        "bl_star": replace(illus_cfg, buffer_interval=0, source_buffer=False, star_columns=True),
-        "combined_full": replace(illus_cfg, buffer_interval=1, source_buffer=True, star_columns=True),
-    }
+    variants = variant_configs(illus_cfg)
     sch_dir = args.out / "schematics"
     sch_dir.mkdir(exist_ok=True)
     for name, cfg in variants.items():
