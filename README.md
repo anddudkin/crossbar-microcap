@@ -93,16 +93,49 @@ For the periodic-buffering sweep (kept separate, see above):
 python3 examples/run_wl_buffer_interval_sweep.py --rows 8 --cols 8 --r-line 10 --r-cell 1000 --v-in 0.7 --intervals 1 2 3 4 8
 ```
 
+## Validating the SPICE model against an analytical solution
+
+`crossbar/analytic.py` solves the *exact same* resistor network directly
+via Modified Nodal Analysis (numpy linear algebra), independently of
+ngspice — same nodes, same buffer/star conditionals as
+`crossbar/netlist.py`, just solved a different way. Since the network is
+linear, this isn't an approximation: ngspice and the MNA solver should
+agree to numerical precision, and disagreement would mean a bug in one of
+the two independent implementations. For `combined_full` specifically,
+there's also a closed-form expression (row IR-drop is fully cancelled by
+WL buffering, and star columns remove cross-cell coupling, leaving each
+cell as its own independent voltage divider against its dedicated column
+resistance):
+
+```
+I_j = sum_i  V_i / (R_cell_ij + R_col * (n - i))
+```
+
+Run the cross-check:
+
+```
+python3 examples/validate_analytic.py --rows 8 --cols 8 --r-line 10 --r-cell 1000 --v-in 0.7
+python3 examples/validate_analytic.py --rows 32 --cols 32 --random --seed 3
+```
+
+On both uniform and randomized arrays up to 32x32 this comes back with
+`max |ngspice - MNA|` around 1e-9 to 1e-10 A (against signals of order
+1e-3 to 1e-2 A) — i.e. floating-point/solver noise, not a real
+discrepancy — and the closed-form/MNA/ngspice triple for `combined_full`
+matches to the same tolerance.
+
 ## Library usage
 
 ```python
 from crossbar.topology import CrossbarConfig
 from crossbar.compare import ideal_vmm, run_variant, compare_all
+from crossbar.analytic import solve_analytic
 
 cfg = CrossbarConfig(g=my_conductance_matrix, v_in=my_input_vector,
                       r_row=10.0, r_col=10.0)
-ideal = ideal_vmm(cfg)          # numpy, no simulator needed
+ideal = ideal_vmm(cfg)          # numpy, no simulator needed (zero wire resistance)
 measured = run_variant(cfg)     # runs ngspice, returns column currents
+analytic = solve_analytic(cfg)  # same network, solved via MNA instead of ngspice
 results = compare_all(cfg)      # baseline / wl_buffer_full / bl_star / combined_full
 ```
 

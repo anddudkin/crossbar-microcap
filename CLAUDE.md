@@ -63,6 +63,19 @@ Data flow: `CrossbarConfig` → `netlist.generate_netlist()` (SPICE text) →
 `compare.py` turns that into error metrics against `compare.ideal_vmm()`
 (the zero-resistance closed-form result, `v_in @ g`, no simulator needed).
 
+`crossbar/analytic.py` (`solve_analytic`) is a second, independent way to
+get the same column currents: it mirrors `generate_netlist` element-for
+-element (same nodes, same buffer/star branches) but builds and solves a
+Modified Nodal Analysis linear system with numpy instead of emitting SPICE
+text and shelling out to ngspice. Because the network is linear, this is
+not an approximate cross-check — the two should agree to floating-point
+precision (see `examples/validate_analytic.py`, which confirms ~1e-9 to
+1e-10 A agreement up to 32x32, plus a closed-form formula for
+`combined_full`). Keep any future change to the electrical model (a new
+compensation flag, a different source/ground convention) mirrored in both
+`netlist.py` and `analytic.py`, or this check silently stops being
+meaningful.
+
 Circuit model (see full description in `README.md`): rows are ideal
 voltage sources with series wire resistance between crosspoints; columns
 terminate in an ideal transimpedance amplifier modeled as a 0V source to
