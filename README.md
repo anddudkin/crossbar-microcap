@@ -124,6 +124,23 @@ On both uniform and randomized arrays up to 32x32 this comes back with
 discrepancy — and the closed-form/MNA/ngspice triple for `combined_full`
 matches to the same tolerance.
 
+`crossbar/analytic.py` actually ships **two** MNA backends, kept side by
+side rather than one replacing the other: `solve_analytic` (dense
+`numpy.linalg.solve`) and `solve_analytic_sparse` (the identical stamps
+assembled as a `scipy.sparse` matrix, solved with `spsolve`). ngspice and
+the dense solver both become impractical well before 128x128 — ngspice
+times out and the dense O(n³) solve exhausts memory — while the sparse
+backend (the network only has a handful of nonzero entries per row) solves
+a 128x128 array in a few seconds:
+
+```
+python3 examples/validate_analytic.py --rows 128 --cols 128 --r-line 1 --r-cell 10000 --v-in 0.7 --sparse --skip-ngspice
+```
+
+`--sparse` also cross-checks dense vs sparse against each other (agreeing
+to ~1e-18, i.e. exactly) whenever the array is still small enough
+(`rows*cols <= 4096`) to run the dense solver at all.
+
 ## Library usage
 
 ```python

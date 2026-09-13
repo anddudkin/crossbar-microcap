@@ -2,17 +2,32 @@
 
 Builds and solves the exact same resistor network described by
 crossbar.netlist.generate_netlist directly via linear algebra (Modified
-Nodal Analysis, MNA) with numpy — no ngspice involved. This mirrors
-generate_netlist element-for-element (same nodes, same buffer/star
-conditionals) so it is a genuinely independent implementation of the same
-electrical model: agreement with crossbar.simulate's ngspice results is a
-correctness check on the SPICE netlist, not merely an approximation — the
-underlying network is linear, so both methods solve the same equations
-exactly (up to floating-point/solver tolerance).
+Nodal Analysis, MNA) — no ngspice involved. This mirrors generate_netlist
+element-for-element (same nodes, same buffer/star conditionals) so it is a
+genuinely independent implementation of the same electrical model:
+agreement with crossbar.simulate's ngspice results is a correctness check
+on the SPICE netlist, not merely an approximation — the underlying network
+is linear, so both methods solve the same equations exactly (up to
+floating-point/solver tolerance).
+
+Two solver backends are provided, both exact (same equations, same
+answer) and kept side by side rather than one replacing the other:
+
+- `solve_analytic` / `_MNA`: dense `numpy.linalg.solve`. Simple, fine up to
+  a few thousand nodes (roughly 32x32-64x64 crossbars) — see
+  examples/validate_analytic.py.
+- `solve_analytic_sparse` / `_MNASparse`: the same stamps assembled into a
+  `scipy.sparse` matrix and solved with `spsolve`. The network is very
+  sparse (every node touches only a handful of neighbours), so this scales
+  to much larger arrays (128x128+) where the dense O(n^3) solve becomes
+  too slow and memory-hungry (dense solve on a 128x128 array was observed
+  to exhaust memory).
 """
 from __future__ import annotations
 
 import numpy as np
+import scipy.sparse as sp
+import scipy.sparse.linalg as spla
 
 from .topology import CrossbarConfig
 
@@ -99,7 +114,81 @@ class _MNA:
         }
 
 
-def _add_buffer(mna: _MNA, name: str, dst: str, src: str, r_out: float) -> None:
+class _MNASparse:
+    """Sparse-matrix counterpart of `_MNA` — identical stamps and the same
+    `resistor`/`vsource`/`vcvs`/`solve` interface, so it's a drop-in
+    replacement wherever a builder object is expected (see `_populate`).
+    Kept as a separate class rather than folded into `_MNA` so the simple
+    dense path stays untouched.
+    """
+
+    def __init__(self) -> None:
+        self._nodes: dict[str, int] = {}
+        self._resistors: list[tuple[int | None, int | None, float]] = []
+        self._vsources: list[tuple[int | None, float]] = []
+        self._vcvs: list[tuple[int | None, int | None, float]] = []
+        self._tags: dict[str, tuple[str, int]] = {}
+
+    def _n(self, name: str) -> int | None:
+        if name == "0":
+            return None
+        return self._nodes.setdefault(name, len(self._nodes))
+
+    def resistor(self, a: str, b: str, r: float) -> None:
+        self._resistors.append((self._n(a), self._n(b), r))
+
+    def vsource(self, node_p: str, value: float, tag: str | None = None) -> None:
+        idx = len(self._vsources)
+        self._vsources.append((self._n(node_p), value))
+        if tag is not None:
+            self._tags[tag] = ("v", idx)
+
+    def vcvs(self, node_out: str, node_ctrl: str, gain: float, tag: str | None = None) -> None:
+        idx = len(self._vcvs)
+        self._vcvs.append((self._n(node_out), self._n(node_ctrl), gain))
+        if tag is not None:
+            self._tags[tag] = ("e", idx)
+
+    def solve(self) -> dict[str, float]:
+        n, nv, ne = len(self._nodes), len(self._vsources), len(self._vcvs)
+        size = n + nv + ne
+        A = sp.lil_matrix((size, size))
+        z = np.zeros(size)
+
+        for a, b, r in self._resistors:
+            g = 1.0 / r
+            if a is not None:
+                A[a, a] += g
+            if b is not None:
+                A[b, b] += g
+            if a is not None and b is not None:
+                A[a, b] -= g
+                A[b, a] -= g
+
+        for k, (node_p, value) in enumerate(self._vsources):
+            row = n + k
+            if node_p is not None:
+                A[node_p, row] -= 1.0
+                A[row, node_p] += 1.0
+            z[row] = value
+
+        for k, (node_out, node_ctrl, gain) in enumerate(self._vcvs):
+            row = n + nv + k
+            if node_out is not None:
+                A[node_out, row] -= 1.0
+                A[row, node_out] += 1.0
+            if node_ctrl is not None:
+                A[row, node_ctrl] -= gain
+            z[row] = 0.0
+
+        x = spla.spsolve(A.tocsc(), z)
+        return {
+            tag: (x[n + idx] if kind == "v" else x[n + nv + idx])
+            for tag, (kind, idx) in self._tags.items()
+        }
+
+
+def _add_buffer(mna, name: str, dst: str, src: str, r_out: float) -> None:
     """Mirrors netlist._buffer_lines: an ideal VCVS, optionally through an
     explicit output resistor instead of driving `dst` directly."""
     if r_out > 0:
@@ -110,13 +199,14 @@ def _add_buffer(mna: _MNA, name: str, dst: str, src: str, r_out: float) -> None:
         mna.vcvs(dst, src, 1.0)
 
 
-def solve_analytic(cfg: CrossbarConfig) -> np.ndarray:
-    """Column output currents for `cfg`, computed by direct MNA instead of
-    ngspice. Same element-by-element structure as
+def _populate(cfg: CrossbarConfig, mna) -> None:
+    """Adds every element of `cfg`'s network to `mna` (either `_MNA` or
+    `_MNASparse` — both expose the same resistor/vsource/vcvs/solve
+    interface). Same element-by-element structure as
     crossbar.netlist.generate_netlist — see that module for the physical
-    reasoning behind each conditional."""
+    reasoning behind each conditional. Shared between both solver backends
+    so they can never drift apart from each other."""
     n, m = cfg.n_rows, cfg.n_cols
-    mna = _MNA()
 
     for i in range(n):
         if cfg.source_buffer:
@@ -150,8 +240,28 @@ def solve_analytic(cfg: CrossbarConfig) -> np.ndarray:
             mna.resistor(cfg.col_node(j, n - 1), bottom, cfg.r_col)
         mna.vsource(bottom, 0.0, tag=f"vsense_{j}")
 
+
+def _column_currents(mna, m: int) -> np.ndarray:
     raw = mna.solve()
     # Vsense sinks whatever the array delivers: physical column current
     # (into the sense node from the array) is the negative of "current the
     # source supplies into that node" (see _MNA.solve docstring).
     return np.array([-raw[f"vsense_{j}"] for j in range(m)])
+
+
+def solve_analytic(cfg: CrossbarConfig) -> np.ndarray:
+    """Column output currents for `cfg`, computed by direct dense MNA
+    instead of ngspice. Fine up to a few thousand nodes; for larger arrays
+    use `solve_analytic_sparse` instead."""
+    mna = _MNA()
+    _populate(cfg, mna)
+    return _column_currents(mna, cfg.n_cols)
+
+
+def solve_analytic_sparse(cfg: CrossbarConfig) -> np.ndarray:
+    """Same exact computation as `solve_analytic`, but assembled as a
+    scipy.sparse matrix and solved with `spsolve` — scales to much larger
+    arrays (128x128+) where the dense solve is too slow/memory-hungry."""
+    mna = _MNASparse()
+    _populate(cfg, mna)
+    return _column_currents(mna, cfg.n_cols)

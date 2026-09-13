@@ -1,8 +1,8 @@
 """Cross-validate the ngspice simulation against an independent analytical
 solution of the same resistor network (crossbar.analytic, direct Modified
-Nodal Analysis via numpy — no SPICE involved).
+Nodal Analysis — no SPICE involved).
 
-Two things are checked:
+Three things are checked:
 1. ngspice vs MNA agree to numerical precision on all four compensation
    variants (baseline / wl_buffer_full / bl_star / combined_full), with and
    without a non-ideal buffer_r_out — this is a correctness check on the
@@ -13,11 +13,16 @@ Two things are checked:
    WL IR-drop is fully cancelled (source_buffer + buffer_interval=1) and BL
    cross-coupling is removed (star_columns), leaving only each cell's own
    (uncoupled) voltage divider against its dedicated column resistance.
+3. With --sparse, the dense (`solve_analytic`) and sparse
+   (`solve_analytic_sparse`) MNA backends agree with each other too — the
+   sparse backend is what makes arrays too large for ngspice/dense MNA
+   (128x128+) practical at all (see --skip-ngspice).
 
 Usage:
     python3 examples/validate_analytic.py [--rows N] [--cols M]
                                            [--r-line OHMS] [--r-cell OHMS]
                                            [--v-in VOLTS] [--seed S]
+                                           [--sparse] [--skip-ngspice]
 """
 from __future__ import annotations
 
@@ -31,8 +36,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import numpy as np
 
 from crossbar.topology import CrossbarConfig
-from crossbar.compare import run_variant
-from crossbar.analytic import solve_analytic
+from crossbar.compare import run_variant, ideal_vmm
+from crossbar.analytic import solve_analytic, solve_analytic_sparse
 
 
 def closed_form_combined_full(cfg: CrossbarConfig) -> np.ndarray:
@@ -51,6 +56,14 @@ def main() -> None:
     ap.add_argument("--v-in", type=float, default=0.7)
     ap.add_argument("--seed", type=int, default=0, help="use a random (non-uniform) array instead of uniform")
     ap.add_argument("--random", action="store_true", help="randomize g/v_in instead of using uniform values")
+    ap.add_argument("--sparse", action="store_true",
+                     help="use the sparse MNA backend as primary (required for large arrays, "
+                          "e.g. 128x128+, where the dense backend is too slow/memory-hungry); "
+                          "also cross-checks it against the dense backend on small arrays "
+                          "(rows*cols <= 4096) where running dense too is still cheap")
+    ap.add_argument("--skip-ngspice", action="store_true",
+                     help="skip ngspice entirely (it times out well before the sparse MNA backend does, "
+                          "e.g. around 128x128) and only compare MNA backends / the closed-form formula")
     args = ap.parse_args()
 
     rng = np.random.default_rng(args.seed)
@@ -79,23 +92,44 @@ def main() -> None:
     print(f"Crossbar: {args.rows}x{args.cols}, R_line={args.r_line} ohm, R_cell base={args.r_cell} ohm, "
           f"{'random' if args.random else 'uniform'} array\n")
 
-    header = f"{'variant':<34}{'max |ngspice - MNA| (A)':>26}"
+    # Primary backend: sparse if requested (and, implicitly, the only sane
+    # choice for large arrays), else the simple dense solver.
+    primary = solve_analytic_sparse if args.sparse else solve_analytic
+    # Only also run dense for comparison when it's still cheap — that's the
+    # whole point of --sparse existing, so don't defeat it at large sizes.
+    compare_dense = args.sparse and args.rows * args.cols <= 4096
+
+    cols = ["variant", "max rel err vs ideal"]
+    if not args.skip_ngspice:
+        cols.append("max |ngspice - MNA| (A)")
+    if compare_dense:
+        cols.append("max |dense - sparse| (A)")
+    header = f"{cols[0]:<34}{cols[1]:>22}" + "".join(f"{c:>28}" for c in cols[2:])
     print(header)
     print("-" * len(header))
     for name, cfg in variants.items():
-        ng = run_variant(cfg)
-        an = solve_analytic(cfg)
-        print(f"{name:<34}{np.max(np.abs(ng - an)):>26.3e}")
+        an = primary(cfg)
+        ideal = ideal_vmm(cfg)
+        row = f"{name:<34}{np.max(np.abs(an - ideal) / np.abs(ideal)):>21.2%}"
+        if not args.skip_ngspice:
+            ng = run_variant(cfg)
+            row += f"{np.max(np.abs(ng - an)):>28.3e}"
+        if compare_dense:
+            dense = solve_analytic(cfg)
+            row += f"{np.max(np.abs(an - dense)):>28.3e}"
+        print(row)
 
     print("\ncombined_full vs closed-form I_j = sum_i V_i/(R_cell_ij + R_col*(n-i)):")
     cf_cfg = variants["combined_full"]
     closed = closed_form_combined_full(cf_cfg)
-    an = solve_analytic(cf_cfg)
-    ng = run_variant(cf_cfg)
+    an = primary(cf_cfg)
     print(f"  closed-form : {np.array2string(closed, precision=8)}")
     print(f"  MNA         : {np.array2string(an, precision=8)}")
-    print(f"  ngspice     : {np.array2string(ng, precision=8)}")
-    print(f"  max |closed-form - ngspice| = {np.max(np.abs(closed - ng)):.3e} A")
+    if not args.skip_ngspice:
+        ng = run_variant(cf_cfg)
+        print(f"  ngspice     : {np.array2string(ng, precision=8)}")
+        print(f"  max |closed-form - ngspice| = {np.max(np.abs(closed - ng)):.3e} A")
+    print(f"  max |closed-form - MNA| = {np.max(np.abs(closed - an)):.3e} A")
 
 
 if __name__ == "__main__":

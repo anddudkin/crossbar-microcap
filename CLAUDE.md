@@ -21,7 +21,7 @@ instead of Micro-Cap.
 
 ```
 sudo apt-get install ngspice        # required system dependency, not pip-installable
-pip install -r requirements.txt     # numpy, matplotlib
+pip install -r requirements.txt     # numpy, matplotlib, scipy
 
 python3 examples/run_demo.py --rows 8 --cols 8 --r-line 10 --r-cell 1000 --v-in 0.7
 python3 examples/run_wl_buffer_interval_sweep.py --rows 8 --cols 8 --r-line 10 --r-cell 1000 --v-in 0.7
@@ -63,18 +63,25 @@ Data flow: `CrossbarConfig` → `netlist.generate_netlist()` (SPICE text) →
 `compare.py` turns that into error metrics against `compare.ideal_vmm()`
 (the zero-resistance closed-form result, `v_in @ g`, no simulator needed).
 
-`crossbar/analytic.py` (`solve_analytic`) is a second, independent way to
-get the same column currents: it mirrors `generate_netlist` element-for
--element (same nodes, same buffer/star branches) but builds and solves a
-Modified Nodal Analysis linear system with numpy instead of emitting SPICE
-text and shelling out to ngspice. Because the network is linear, this is
-not an approximate cross-check — the two should agree to floating-point
-precision (see `examples/validate_analytic.py`, which confirms ~1e-9 to
-1e-10 A agreement up to 32x32, plus a closed-form formula for
-`combined_full`). Keep any future change to the electrical model (a new
-compensation flag, a different source/ground convention) mirrored in both
-`netlist.py` and `analytic.py`, or this check silently stops being
-meaningful.
+`crossbar/analytic.py` is a second, independent way to get the same
+column currents: `_populate(cfg, mna)` mirrors `generate_netlist`
+element-for-element (same nodes, same buffer/star branches) against a
+builder object, then either `solve_analytic` (`_MNA`, dense
+`numpy.linalg.solve`) or `solve_analytic_sparse` (`_MNASparse`, same
+stamps as a `scipy.sparse` matrix solved with `spsolve`) turns that into
+column currents. Both are exact — the network is linear, so this isn't an
+approximate cross-check, ngspice/dense/sparse should all agree to
+floating-point precision (see `examples/validate_analytic.py`, ~1e-9 to
+1e-10 A agreement, plus a closed-form formula for `combined_full`). The
+two backends exist side by side deliberately, neither superseding the
+other: dense is simpler and is what most call sites use for arrays up to
+a few thousand nodes, while ngspice (subprocess timeout) and the dense
+O(n^3) solve (memory) both become impractical around 128x128, where the
+sparse backend still solves in seconds (the network has only a handful of
+nonzero entries per row). Keep any future change to the electrical model
+(a new compensation flag, a different source/ground convention) mirrored
+in `netlist.py` and in `_populate` (which both `analytic` backends share),
+or this check silently stops being meaningful.
 
 Circuit model (see full description in `README.md`): rows are ideal
 voltage sources with series wire resistance between crosspoints; columns
