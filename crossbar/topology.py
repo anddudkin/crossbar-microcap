@@ -51,6 +51,27 @@ Compensation methods
   (all cells in a column share this one resistor), so combined_full's
   closed-form formula (see examples/validate_analytic.py) needs the
   generalized version once r_col_end > 0.
+- comparator_buffer = True: every buffer that source_buffer/buffer_interval
+  would otherwise place (see above) is instead a threshold comparator/
+  inverter repeater — the electrical model used in the original
+  reference/microcap/base_r_line_10_WL_invertor.cir (`.SUBCKT INV`:
+  `E1 3 0 VALUE = { IF ( V(1)>0.35V, 100m, 0.7) }` plus a series output
+  resistor), for a *fixed-amplitude* (pulsed/spiking) signalling scheme
+  rather than continuous analog VMM: instead of linearly reproducing
+  whatever V_i is, it snaps the row to one of two fixed rails
+  (buffer_v_low/buffer_v_high) depending on which side of
+  buffer_threshold V_i falls on. Since every buffer here is already
+  referenced to the row's own *ideal, undropped* source node (V_i is a
+  known Python float at netlist-build time, not a simulator unknown), this
+  HIGH/LOW decision is precomputed once (see buffer_output_level below)
+  and stamped as an ordinary fixed DC source — mathematically identical to
+  evaluating the real IF(...) expression at that same ideal node, but
+  strictly linear, so it stays exactly solvable by the dense/sparse
+  analytic backends too (they cannot stamp a genuine nonlinear
+  comparator). buffer_r_out still applies, mirroring the INV subckt's
+  series output resistor. This is a separate, self-contained experiment
+  (see examples/run_pulsed_buffer_demo.py) — not part of compare_all's
+  four analog-VMM variants.
 
 Any of these can be combined with star_columns = True.
 """
@@ -71,6 +92,10 @@ class CrossbarConfig:
     buffer_r_out: float = 0.0  # ohms of output (series) resistance for every buffer; 0 = ideal
     star_columns: bool = False  # True enables per-cell dedicated column wiring
     r_col_end: float = 0.0  # ohms of shared bit-line-end resistance before the sense amp; 0 = none
+    comparator_buffer: bool = False  # True: buffers are a threshold comparator/inverter repeater (fixed-amplitude/pulsed signalling), not a linear unity-gain VCVS
+    buffer_threshold: float = 0.35  # volts; comparator decision point (default matches reference/microcap's .SUBCKT INV)
+    buffer_v_low: float = 0.1  # volts; comparator output rail when V_i <= buffer_threshold
+    buffer_v_high: float = 0.7  # volts; comparator output rail when V_i > buffer_threshold
     name: str = "crossbar"
 
     def __post_init__(self) -> None:
@@ -88,6 +113,8 @@ class CrossbarConfig:
             raise ValueError("buffer_r_out must be >= 0")
         if self.r_col_end < 0:
             raise ValueError("r_col_end must be >= 0")
+        if self.buffer_v_low >= self.buffer_v_high:
+            raise ValueError("buffer_v_low must be < buffer_v_high")
 
     @property
     def n_rows(self) -> int:
@@ -100,16 +127,27 @@ class CrossbarConfig:
     def variant_label(self) -> str:
         wl = self.source_buffer and self.buffer_interval == 1
         if wl and self.star_columns:
-            return "combined_full"
-        if wl:
-            return "wl_buffer_full"
-        if self.buffer_interval > 0 and self.star_columns:
-            return "combined_periodic"
-        if self.buffer_interval > 0:
-            return "wl_buffer_periodic"
-        if self.star_columns:
-            return "bl_star"
-        return "baseline"
+            label = "combined_full"
+        elif wl:
+            label = "wl_buffer_full"
+        elif self.buffer_interval > 0 and self.star_columns:
+            label = "combined_periodic"
+        elif self.buffer_interval > 0:
+            label = "wl_buffer_periodic"
+        elif self.star_columns:
+            label = "bl_star"
+        else:
+            label = "baseline"
+        return f"{label}_pulsed" if self.comparator_buffer else label
+
+    def buffer_output_level(self, i: int) -> float:
+        """The comparator/inverter repeater's precomputed HIGH/LOW output for
+        row i (see comparator_buffer above). Every buffer in this project is
+        referenced to the row's own ideal, undropped source node, so V_i is
+        already a known value at netlist-build time — this is the single
+        place that decision is made, shared by netlist.py and analytic.py so
+        they can't drift apart."""
+        return self.buffer_v_high if self.v_in[i] > self.buffer_threshold else self.buffer_v_low
 
     def row_node(self, i: int, j: int) -> str:
         """SPICE node name for row i at crosspoint j (0-indexed)."""

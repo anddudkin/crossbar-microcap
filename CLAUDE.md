@@ -25,6 +25,8 @@ pip install -r requirements.txt     # numpy, matplotlib, scipy
 
 python3 examples/run_demo.py --rows 8 --cols 8 --r-line 10 --r-cell 1000 --v-in 0.7
 python3 examples/run_wl_buffer_interval_sweep.py --rows 8 --cols 8 --r-line 10 --r-cell 1000 --v-in 0.7
+python3 examples/run_error_landscape.py                 # array size x R_line/R_cell ratio sweep, none/partial/full
+python3 examples/run_periphery_sweep.py                 # r_col_end/R_col sweep
 ```
 
 There is no test suite, linter, or build step configured. There is no
@@ -130,6 +132,25 @@ Compensation methods are not separate code paths but flags on the same
   resistor. `examples/validate_analytic.py`'s `closed_form_combined_full`
   has the generalized (Millman's theorem) formula for this case, verified
   to agree with ngspice/MNA to floating-point precision via `--r-col-end`.
+- `comparator_buffer = True` swaps every buffer `source_buffer`/
+  `buffer_interval` would otherwise place for a threshold comparator/
+  inverter repeater instead of the linear unity-gain VCVS — the model used
+  by the original `reference/microcap/base_r_line_10_WL_invertor.cir`
+  (`.SUBCKT INV`), appropriate for *fixed-amplitude* (pulsed/spiking)
+  signalling rather than continuous analog VMM: it snaps the row to one of
+  two fixed rails (`buffer_v_low`/`buffer_v_high`) depending on which side
+  of `buffer_threshold` `V_i` falls on, instead of linearly reproducing
+  `V_i`. Every buffer is referenced to the row's own ideal, undropped
+  source node, so this HIGH/LOW decision is a known Python float at
+  netlist-build time (`CrossbarConfig.buffer_output_level`) — it's stamped
+  as an ordinary fixed DC source (`Vbuf_*`/`Vbufsrc_*`, not `Ebuf_*`/
+  `Ebufsrc_*`), so it stays strictly linear and the dense/sparse analytic
+  backends (which cannot represent a genuine nonlinear comparator) still
+  agree with ngspice to floating-point precision. `buffer_r_out` still
+  applies. This is a separate, self-contained experiment — see
+  `examples/run_pulsed_buffer_demo.py` — not part of `compare_all`'s four
+  analog-VMM variants; `variant_label()` only appends a `_pulsed` suffix
+  for display.
 - `compare.variant_configs(base_cfg)` returns the four combinations of the
   *full* WL method with `star_columns` as a `{label: CrossbarConfig}` dict
   (baseline / wl_buffer_full / bl_star / combined_full); `compare_all`
@@ -142,7 +163,11 @@ Compensation methods are not separate code paths but flags on the same
   resistances/voltage/array size on the CLI, run any subset of the four
   variants (`--variants`), and pick `ngspice`/`dense`/`sparse` as the
   backend (`--backend`) — the last two calling straight into
-  `crossbar.analytic` instead of shelling out.
+  `crossbar.analytic` instead of shelling out. `compare.BACKENDS` is the
+  `{name: cfg -> currents}` dict that dispatch is built from — originally
+  declared ad hoc inside `run_compare.py`, centralized here once a second
+  script needed the same three-way choice, so scripts share one dispatch
+  instead of each redeclaring (and risking drift on) their own copy.
 
 `crossbar/schematic.py` draws the regular grid structure directly from
 `CrossbarConfig` (matplotlib, saved as SVG+PNG) rather than laying out the
@@ -164,9 +189,13 @@ resistor zigzag, matching the crossbar figures common in ReRAM/memristor
 papers. `r_col_end > 0` draws one extra zigzag per column (labelled
 `R_end`, separated from the last per-cell zigzag by a short plain lead so
 they read as two components, not one) between the column's own wiring and
-the TIA — `_bottom_y(cfg, row_y)` grows the figure to fit it, used
-consistently by both `draw_crossbar` and `save_schematic` so their
-computed sizes never disagree.
+the ground symbol (`_tia`, despite the name, now draws a plain virtual-ground
+termination — see below) — `_bottom_y(cfg, row_y)` grows the figure to fit
+it, used consistently by both `draw_crossbar` and `save_schematic` so their
+computed sizes never disagree. A buffer symbol gets an added output-tip
+bubble (the standard inverting-gate mark) when `comparator_buffer = True`,
+so a pulsed-signalling figure is visually distinct from an analog one at a
+glance (see `_buffer`).
 
 `examples/run_demo.py` is the orchestration script (CLI flags for array
 size, line/cell resistance, input voltage) and the reference for how the
@@ -178,8 +207,38 @@ only from wire position, isolating the IR-drop effect being studied.
 `examples/run_wl_buffer_interval_sweep.py` is the separate script for the
 periodic-buffering research question (`buffer_interval` swept,
 `source_buffer=False`); it's independent of `compare_all` on purpose so
-that experiment doesn't get entangled with the main one. `out/` is
-gitignored — it is regenerated output, not checked-in state.
+that experiment doesn't get entangled with the main one.
+`examples/run_pulsed_buffer_demo.py` is likewise kept fully independent of
+`compare_all`/`compare.variant_configs` for the `comparator_buffer`
+experiment — it cross-checks ngspice/dense/sparse agreement for that
+variant and scores it against the regenerated rail levels rather than raw
+`v_in` (see that script's docstring for why). `out/` is gitignored — it is
+regenerated output, not checked-in state.
+
+`examples/run_error_landscape.py` is the main paper experiment: it sweeps
+array size and the `R_line`/`R_cell` ratio on a grid (using the
+dense/sparse backends, not ngspice, so it scales to `256x256`+) and scores
+eight variants at every grid point spanning none/partial/full
+compensation — the four `variant_configs` variants plus four ad hoc
+"partial" degrees built locally (`wl_partial_2`/`wl_partial_4`: periodic
+buffering without a source buffer; `wl_full_nonideal_lo`/`_hi`: full
+buffering topology with `buffer_r_out` set to 10%/50% of `r_row`). It
+relies on — and `--verify-invariance` directly checks — the fact that the
+crossbar is a linear resistive network: scaling every resistance by the
+same factor leaves relative error unchanged, so only the *ratio*
+`R_line`/`R_cell` matters, not absolute magnitudes (`buffer_r_out` is
+likewise swept as a fraction of `r_row`, not a fixed ohm value, for the
+same reason). Outputs a long-format CSV plus three figures (a
+size-by-ratio heatmap per variant, and two line-plot slices) into `out/`.
+`examples/run_periphery_sweep.py` is the companion `r_col_end` study:
+since `r_col_end` is emitted regardless of `star_columns` and reintroduces
+the cross-cell coupling `star_columns` otherwise removes, this sweeps
+`r_col_end`/`R_col` across the four `variant_configs` variants at a couple
+of representative array sizes, to see how much of `bl_star`'s/
+`combined_full`'s benefit survives as the shared peripheral resistor grows.
+Both new scripts assign each variant a fixed color reused across every
+figure they produce (see each script's `VARIANT_COLORS`), so a variant's
+identity in one plot means the same thing in another.
 
 ## Extending the cell model
 

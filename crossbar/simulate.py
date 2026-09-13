@@ -3,14 +3,23 @@ from __future__ import annotations
 
 import re
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
 
 _OP_LINE_RE = re.compile(r"^\s*([a-zA-Z0-9_@().]+)\s*=\s*([-+0-9.eE]+)\s*$")
 
+# On Windows, the official ngspice distribution ships two binaries: ngspice.exe
+# (GUI-subsystem build, does not attach to a piped/captured stdout when run
+# headless — batch-mode output comes back empty) and ngspice_con.exe (the
+# console-subsystem build meant for exactly this kind of subprocess/batch
+# use). Plain "ngspice" resolves to the former on Windows, so default to the
+# console build there; Linux packages only provide a plain "ngspice" binary.
+_DEFAULT_NGSPICE_BIN = "ngspice_con" if sys.platform == "win32" else "ngspice"
 
-def run_ngspice(netlist: str, ngspice_bin: str = "ngspice") -> str:
+
+def run_ngspice(netlist: str, ngspice_bin: str = _DEFAULT_NGSPICE_BIN) -> str:
     """Write `netlist` to a temp file, run ngspice -b on it, return raw stdout."""
     with tempfile.NamedTemporaryFile("w", suffix=".cir", delete=False) as f:
         f.write(netlist)

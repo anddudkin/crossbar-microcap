@@ -3,9 +3,11 @@ wire resistance) result."""
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from typing import Callable
 
 import numpy as np
 
+from .analytic import solve_analytic, solve_analytic_sparse
 from .netlist import generate_netlist
 from .simulate import run_ngspice, read_column_currents
 from .topology import CrossbarConfig
@@ -21,6 +23,20 @@ def run_variant(cfg: CrossbarConfig) -> np.ndarray:
     stdout = run_ngspice(netlist)
     currents = read_column_currents(stdout, cfg.n_cols)
     return np.array(currents)
+
+
+#: Maps a backend name to a `cfg -> column currents` callable, so a script
+#: that lets the user pick ngspice vs one of the two independent MNA
+#: solvers from crossbar.analytic (dense/sparse — see that module for when
+#: each one is practical) doesn't have to redefine this dispatch itself.
+#: Originally declared ad hoc in examples/run_compare.py; centralized here
+#: once a second script (examples/run_error_landscape.py) needed the same
+#: thing, so the two/three copies couldn't drift apart.
+BACKENDS: dict[str, Callable[[CrossbarConfig], np.ndarray]] = {
+    "ngspice": run_variant,
+    "dense": solve_analytic,
+    "sparse": solve_analytic_sparse,
+}
 
 
 @dataclass

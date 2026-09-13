@@ -9,19 +9,49 @@ def _fmt(x: float) -> str:
     return repr(float(x))
 
 
-def _buffer_lines(name: str, dst: str, src: str, r_out: float) -> list[str]:
-    """Netlist lines for one ideal unity-gain buffer (`name` is its element
-    name prefix), from `src` node to `dst` node. If `r_out` > 0, the VCVS
-    drives an internal node through an explicit series output resistor
-    instead of `dst` directly, modelling a non-ideal (finite drive
-    strength) buffer instead of an idealized zero-impedance one."""
+def _buffer_lines(base: str, dst: str, src: str, r_out: float) -> list[str]:
+    """Netlist lines for one ideal unity-gain buffer (`base` is its element
+    name minus the leading SPICE type letter), from `src` node to `dst`
+    node. If `r_out` > 0, the VCVS drives an internal node through an
+    explicit series output resistor instead of `dst` directly, modelling a
+    non-ideal (finite drive strength) buffer instead of an idealized
+    zero-impedance one."""
+    name = f"E{base}"
     if r_out > 0:
-        inode = f"{name}_out"
+        inode = f"{base}_out"
         return [
             f"{name} {inode} 0 {src} 0 1",
-            f"R{name}_rout {inode} {dst} {_fmt(r_out)}",
+            f"R{base}_rout {inode} {dst} {_fmt(r_out)}",
         ]
     return [f"{name} {dst} 0 {src} 0 1"]
+
+
+def _comparator_buffer_lines(base: str, dst: str, level: float, r_out: float) -> list[str]:
+    """Netlist lines for one comparator/inverter repeater (see
+    CrossbarConfig.comparator_buffer): a fixed DC source at the precomputed
+    HIGH/LOW `level` instead of a VCVS copying `src` — the row's own source
+    node is always ideal/undropped, so that decision is already known at
+    netlist-build time (see CrossbarConfig.buffer_output_level). Same
+    r_out > 0 series-output-resistance convention as _buffer_lines. Element
+    name starts with V (an independent source), not E — the first letter
+    is what ngspice uses to parse the card, and this is no longer a VCVS."""
+    name = f"V{base}"
+    if r_out > 0:
+        inode = f"{base}_out"
+        return [
+            f"{name} {inode} 0 DC {_fmt(level)}",
+            f"R{base}_rout {inode} {dst} {_fmt(r_out)}",
+        ]
+    return [f"{name} {dst} 0 DC {_fmt(level)}"]
+
+
+def _buffer_or_comparator_lines(cfg: CrossbarConfig, i: int, base: str, dst: str, src: str) -> list[str]:
+    """Dispatches to the ideal linear buffer or the comparator repeater,
+    whichever cfg.comparator_buffer selects, at one row/dst/src insertion
+    point (placement logic is identical either way)."""
+    if cfg.comparator_buffer:
+        return _comparator_buffer_lines(base, dst, cfg.buffer_output_level(i), cfg.buffer_r_out)
+    return _buffer_lines(base, dst, src, cfg.buffer_r_out)
 
 
 def generate_netlist(cfg: CrossbarConfig, title: str | None = None) -> str:
@@ -38,7 +68,7 @@ def generate_netlist(cfg: CrossbarConfig, title: str | None = None) -> str:
             # the source is made non-ideal later).
             src_node = f"vsrc_{i}"
             lines.append(f"V{i} {src_node} 0 DC {_fmt(cfg.v_in[i])}")
-            lines.extend(_buffer_lines(f"Ebufsrc_{i}", cfg.row_node(i, 0), src_node, cfg.buffer_r_out))
+            lines.extend(_buffer_or_comparator_lines(cfg, i, f"bufsrc_{i}", cfg.row_node(i, 0), src_node))
         else:
             lines.append(f"V{i} {cfg.row_node(i, 0)} 0 DC {_fmt(cfg.v_in[i])}")
 
@@ -52,7 +82,7 @@ def generate_netlist(cfg: CrossbarConfig, title: str | None = None) -> str:
                 # node voltage (exact V_i, since the source is ideal),
                 # through buffer_r_out ohms of output resistance (0 = ideal,
                 # regardless of the current drawn downstream).
-                lines.extend(_buffer_lines(f"Ebuf_{i}_{j}", dst, cfg.row_node(i, 0), cfg.buffer_r_out))
+                lines.extend(_buffer_or_comparator_lines(cfg, i, f"buf_{i}_{j}", dst, cfg.row_node(i, 0)))
             else:
                 lines.append(f"Rrow_{i}_{j} {src} {dst} {_fmt(cfg.r_row)}")
 

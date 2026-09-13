@@ -64,6 +64,37 @@ crosspoint, `source_buffer=False`, the original idea from
 question — see `examples/run_wl_buffer_interval_sweep.py` — and is not part
 of the four variants above.
 
+## Pulsed / fixed-amplitude signalling (experimental)
+
+Every buffer above is an ideal *linear* unity-gain amplifier: it reproduces
+whatever analog voltage `V_i` is, which is what continuous-amplitude VMM
+needs. `base_r_line_10_WL_invertor.cir`'s original repeater is different —
+a threshold *comparator* (`.SUBCKT INV`) that snaps the row to one of two
+fixed logic rails instead of copying an arbitrary analog value. That's the
+right model when every row signal really is one of a small fixed set of
+amplitudes, as in a pulsed/spiking network, and inverters are far cheaper
+in silicon area/power than an op-amp buffer.
+
+Setting `comparator_buffer=True` on `CrossbarConfig` (alongside
+`source_buffer`/`buffer_interval`, which still control *where* buffers go)
+switches every buffer there to this comparator model instead: it outputs
+`buffer_v_high` if `V_i > buffer_threshold`, else `buffer_v_low` (defaults
+0.7 V / 0.35 V / 0.1 V, matching the original `.SUBCKT INV`). Because every
+buffer here is referenced to the row's own ideal, undropped source node,
+that decision is already known when the netlist is built — so it's stamped
+as an ordinary fixed voltage source rather than a true nonlinear element,
+which keeps it exactly solvable by ngspice *and* the dense/sparse analytic
+backends (see below), unlike a real SPICE behavioral comparator.
+
+This is a separate, self-contained experiment, deliberately kept out of the
+four `compare_all` variants above (it answers "how would a
+pulsed/fixed-amplitude signalling scheme fare", not "how well does analog
+VMM compensation work") — see `examples/run_pulsed_buffer_demo.py`:
+
+```
+python3 examples/run_pulsed_buffer_demo.py --rows 8 --cols 8 --v-in 0.1 0.7 --schematic
+```
+
 ## Requirements
 
 ```

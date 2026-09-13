@@ -199,6 +199,28 @@ def _add_buffer(mna, name: str, dst: str, src: str, r_out: float) -> None:
         mna.vcvs(dst, src, 1.0)
 
 
+def _add_comparator_buffer(mna, name: str, dst: str, level: float, r_out: float) -> None:
+    """Mirrors netlist._comparator_buffer_lines: a fixed DC source at the
+    precomputed HIGH/LOW `level`, optionally through an explicit output
+    resistor, instead of a VCVS copying `src`."""
+    if r_out > 0:
+        inode = f"{name}_out"
+        mna.vsource(inode, level)
+        mna.resistor(inode, dst, r_out)
+    else:
+        mna.vsource(dst, level)
+
+
+def _add_buffer_or_comparator(cfg: CrossbarConfig, mna, i: int, name: str, dst: str, src: str) -> None:
+    """Dispatches to the ideal linear buffer or the comparator repeater,
+    whichever cfg.comparator_buffer selects — mirrors
+    netlist._buffer_or_comparator_lines."""
+    if cfg.comparator_buffer:
+        _add_comparator_buffer(mna, name, dst, cfg.buffer_output_level(i), cfg.buffer_r_out)
+    else:
+        _add_buffer(mna, name, dst, src, cfg.buffer_r_out)
+
+
 def _populate(cfg: CrossbarConfig, mna) -> None:
     """Adds every element of `cfg`'s network to `mna` (either `_MNA` or
     `_MNASparse` — both expose the same resistor/vsource/vcvs/solve
@@ -212,7 +234,7 @@ def _populate(cfg: CrossbarConfig, mna) -> None:
         if cfg.source_buffer:
             src_node = f"vsrc_{i}"
             mna.vsource(src_node, float(cfg.v_in[i]))
-            _add_buffer(mna, f"Ebufsrc_{i}", cfg.row_node(i, 0), src_node, cfg.buffer_r_out)
+            _add_buffer_or_comparator(cfg, mna, i, f"bufsrc_{i}", cfg.row_node(i, 0), src_node)
         else:
             mna.vsource(cfg.row_node(i, 0), float(cfg.v_in[i]))
 
@@ -220,7 +242,7 @@ def _populate(cfg: CrossbarConfig, mna) -> None:
         for j in range(1, m):
             dst, src = cfg.row_node(i, j), cfg.row_node(i, j - 1)
             if cfg.is_buffered_step(j):
-                _add_buffer(mna, f"Ebuf_{i}_{j}", dst, cfg.row_node(i, 0), cfg.buffer_r_out)
+                _add_buffer_or_comparator(cfg, mna, i, f"buf_{i}_{j}", dst, cfg.row_node(i, 0))
             else:
                 mna.resistor(src, dst, cfg.r_row)
 

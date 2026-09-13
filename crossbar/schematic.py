@@ -48,13 +48,15 @@ def _zigzag(ax, x0, y0, x1, y1, n=6, amp=0.09, lw=1.1, **kw):
     ax.plot(xs, ys, color="black", lw=lw, solid_capstyle="round", **kw)
 
 
-def _vsource(ax, x, y, label, source_buffer=False, buffer_r_out=0.0):
+def _vsource(ax, x, y, label, source_buffer=False, buffer_r_out=0.0, comparator_buffer=False):
     """Circle voltage source, drawn to the left feeding into (x, y).
 
-    If `source_buffer`, a unity-gain buffer is inserted on the wire between
-    the source and (x, y) — the explicit "buffer right at the source" stage
-    (see CrossbarConfig.source_buffer). `buffer_r_out` > 0 draws its output
-    resistance as a zigzag instead of a plain wire out of the buffer.
+    If `source_buffer`, a buffer is inserted on the wire between the source
+    and (x, y) — the explicit "buffer right at the source" stage (see
+    CrossbarConfig.source_buffer): a unity-gain analog buffer, or (if
+    `comparator_buffer`) a comparator/inverter repeater — see `_buffer`.
+    `buffer_r_out` > 0 draws its output resistance as a zigzag instead of a
+    plain wire out of the buffer.
     """
     cx = x - 0.85 if source_buffer else x - 0.55
     ax.add_patch(Circle((cx, y), 0.22, fill=False, lw=1.2, color="black"))
@@ -66,17 +68,22 @@ def _vsource(ax, x, y, label, source_buffer=False, buffer_r_out=0.0):
             _zigzag(ax, bx + _BUFFER_HALF_W, y, x, y, n=3, amp=0.05, lw=0.8)
         else:
             ax.plot([bx + _BUFFER_HALF_W, x], [y, y], color="black", lw=1.0)
-        _buffer(ax, bx, y)
+        _buffer(ax, bx, y, pulsed=comparator_buffer)
     else:
         ax.plot([cx + 0.22, x], [y, y], color="black", lw=1.0)
     ax.text(cx - 0.3, y, label, ha="right", va="center", fontsize=8)
 
 
-def _buffer(ax, x, y):
-    """Unity-gain buffer (op-amp triangle) symbol centred at (x, y)."""
+def _buffer(ax, x, y, pulsed=False):
+    """Buffer symbol centred at (x, y): a unity-gain analog buffer triangle,
+    or — if `pulsed` (CrossbarConfig.comparator_buffer) — the same triangle
+    with the standard inverting-gate output bubble added at its tip, for the
+    threshold-comparator/inverter repeater used in fixed-amplitude (pulsed)
+    signalling instead of a linear buffer."""
     w, h = _BUFFER_HALF_W, _BUFFER_HALF_H
+    tip_x = x + w
     tri = Polygon(
-        [(x - w, y - h), (x - w, y + h), (x + w, y)],
+        [(x - w, y - h), (x - w, y + h), (tip_x, y)],
         closed=True,
         fill=True,
         facecolor="white",
@@ -84,7 +91,12 @@ def _buffer(ax, x, y):
         lw=1.1,
     )
     ax.add_patch(tri)
-    ax.text(x, y, "1x", ha="center", va="center", fontsize=6)
+    if pulsed:
+        bubble_r = 0.05
+        ax.add_patch(Circle((tip_x + bubble_r, y), bubble_r, fill=False, lw=1.0, color="black"))
+        ax.text(x - 0.03, y, "INV", ha="center", va="center", fontsize=5)
+    else:
+        ax.text(x, y, "1x", ha="center", va="center", fontsize=6)
 
 
 def _memristor_box(ax, x, y0, y1, label):
@@ -143,6 +155,7 @@ def draw_crossbar(cfg: CrossbarConfig, ax=None, title: str | None = None):
         _vsource(
             ax, col_x[0], y, f"V{i}={cfg.v_in[i]:g}V",
             source_buffer=cfg.source_buffer, buffer_r_out=cfg.buffer_r_out,
+            comparator_buffer=cfg.comparator_buffer,
         )
         for j in range(1, m):
             x0, x1 = col_x[j - 1], col_x[j]
@@ -153,7 +166,7 @@ def draw_crossbar(cfg: CrossbarConfig, ax=None, title: str | None = None):
                     _zigzag(ax, bx + _BUFFER_HALF_W, y, x1, y, n=3, amp=0.05, lw=0.8)
                 else:
                     ax.plot([bx + _BUFFER_HALF_W, x1], [y, y], color="black", lw=1.0)
-                _buffer(ax, bx, y)
+                _buffer(ax, bx, y, pulsed=cfg.comparator_buffer)
             else:
                 # Interconnect (word-line) wire resistance R_row.
                 _zigzag(ax, x0, y, x1, y, n=3, amp=0.055, lw=0.9)

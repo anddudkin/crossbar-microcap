@@ -36,18 +36,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import numpy as np
 
 from crossbar.topology import CrossbarConfig
-from crossbar.compare import ideal_vmm, variant_configs, compute_errors
-from crossbar.simulate import run_ngspice, read_column_currents
-from crossbar.netlist import generate_netlist
-from crossbar.analytic import solve_analytic, solve_analytic_sparse
+from crossbar.compare import ideal_vmm, variant_configs, compute_errors, BACKENDS
 
 ALL_VARIANTS = ["baseline", "wl_buffer_full", "bl_star", "combined_full"]
-
-BACKENDS = {
-    "ngspice": lambda cfg: read_column_currents(run_ngspice(generate_netlist(cfg)), cfg.n_cols),
-    "dense": solve_analytic,
-    "sparse": solve_analytic_sparse,
-}
 
 
 def main() -> None:
