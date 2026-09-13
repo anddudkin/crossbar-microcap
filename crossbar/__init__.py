@@ -1,7 +1,7 @@
 from .topology import CrossbarConfig
 from .netlist import generate_netlist
 from .simulate import run_ngspice, read_column_currents
-from .compare import ideal_vmm, run_variant, compare_all, evaluate_variant
+from .compare import ideal_vmm, run_variant, compare_all, evaluate_variant, variant_configs, compute_errors
 from .analytic import solve_analytic, solve_analytic_sparse
 
 __all__ = [
@@ -13,6 +13,8 @@ __all__ = [
     "run_variant",
     "compare_all",
     "evaluate_variant",
+    "variant_configs",
+    "compute_errors",
     "solve_analytic",
     "solve_analytic_sparse",
 ]

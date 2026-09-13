@@ -119,11 +119,19 @@ Compensation methods are not separate code paths but flags on the same
   a dedicated resistor from each crosspoint straight to the column's
   virtual ground (length/resistance scales with distance from the
   bottom), removing shared-wire coupling between cells in a column.
-- `compare.compare_all` runs four combinations of the *full* WL method with
-  `star_columns`: baseline / wl_buffer_full / bl_star / combined_full.
-  `compare.evaluate_variant` is the reusable single-variant runner (ngspice
-  run + error metrics) both `compare_all` and the interval-sweep script
-  build on, so a new variant set doesn't need to duplicate that plumbing.
+- `compare.variant_configs(base_cfg)` returns the four combinations of the
+  *full* WL method with `star_columns` as a `{label: CrossbarConfig}` dict
+  (baseline / wl_buffer_full / bl_star / combined_full); `compare_all`
+  just runs all of them. `compare.evaluate_variant` is the reusable
+  single-variant runner (ngspice run + `compute_errors`) both
+  `compare_all` and the interval-sweep script build on, and
+  `compute_errors(ideal, measured)` (RMSE, max abs, max rel, mean rel) is
+  public so a script using a different backend can score results the same
+  way without ngspice — see `examples/run_compare.py`, which lets you set
+  resistances/voltage/array size on the CLI, run any subset of the four
+  variants (`--variants`), and pick `ngspice`/`dense`/`sparse` as the
+  backend (`--backend`) — the last two calling straight into
+  `crossbar.analytic` instead of shelling out.
 
 `crossbar/schematic.py` draws the regular grid structure directly from
 `CrossbarConfig` (matplotlib, saved as SVG+PNG) rather than laying out the

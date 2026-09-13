@@ -93,6 +93,22 @@ For the periodic-buffering sweep (kept separate, see above):
 python3 examples/run_wl_buffer_interval_sweep.py --rows 8 --cols 8 --r-line 10 --r-cell 1000 --v-in 0.7 --intervals 1 2 3 4 8
 ```
 
+For quick what-if numbers — different resistances, or only some of the
+four variants, without the schematics/plot `run_demo.py` also generates —
+use `examples/run_compare.py`:
+
+```
+python3 examples/run_compare.py --r-line 1 --r-cell 10000 --v-in 0.7
+python3 examples/run_compare.py --variants baseline combined_full
+python3 examples/run_compare.py --rows 128 --cols 128 --r-line 1 --r-cell 10000 --backend sparse
+python3 examples/run_compare.py --csv out/my_comparison.csv
+```
+
+`--backend` picks ngspice (default), or one of the two MNA solvers from
+`crossbar/analytic.py` (`dense`/`sparse`) — useful since ngspice and the
+dense solver both become impractical around 128x128 (see the validation
+section below), while `sparse` handles that in a couple of seconds.
+
 ## Validating the SPICE model against an analytical solution
 
 `crossbar/analytic.py` solves the *exact same* resistor network directly
